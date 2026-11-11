@@ -1,9 +1,9 @@
 /* Service worker de Alimentos Sanos. Al publicar una versión nueva, subir VERSION (y version.json y APP_VERSION en app.js).
    Nunca toca IndexedDB: los datos del usuario sobreviven a las actualizaciones. */
-const VERSION='1.0.3';
+const VERSION='1.0.4';
 const CACHE='md-shell-'+VERSION;
 const IMG_CACHE='md-img';
-const SHELL=['./','./index.html','./app.css','./app.js','./db.js','./html5-qrcode.min.js','./manifest.json','./icon-192.png','./icon-512.png','./icon-maskable.png','./apple-touch-icon.png','./favicon.ico','./header-icon.png','./nutrition.js','./ocr.js'];
+const SHELL=['./','./index.html','./app.css','./app.js','./db.js','./zxing.min.js','./scanner.js','./manifest.json','./icon-192.png','./icon-512.png','./icon-maskable.png','./apple-touch-icon.png','./favicon.ico','./header-icon.png','./nutrition.js','./ocr.js'];
 self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(SHELL.map(u=>new Request(u,{cache:'reload'})))).then(()=>self.skipWaiting()))});
 self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k.startsWith('md-shell-')&&k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()))});
 self.addEventListener('message',e=>{if(e.data==='skipWaiting')self.skipWaiting()});

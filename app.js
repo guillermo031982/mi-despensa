@@ -1,10 +1,10 @@
 /* Alimentos Sanos — complemento personal a Yuka. Vanilla JS, datos en IndexedDB (db.js). */
-const APP_VERSION='1.0.3';
+const APP_VERSION='1.0.4';
 const $=(s,r=document)=>r.querySelector(s);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,8);
 const view=$('#view');
-let scanner=null, pending=null; // pending = producto consultado aún sin guardar
+let pending=null; // pending = producto consultado aún sin guardar
 
 const DEFAULT_CATS=[['Embutidos','🥓','#dc2626'],['Yogures','🥛','#2563eb'],['Quesos','🧀','#f59e0b'],['Bebidas','🧃','#0891b2'],['Snacks y dulces','🍫','#9333ea'],['Conservas','🥫','#ea580c'],['Cosmética','🧴','#db2777'],['Limpieza','🧽','#0d9488']];
 const COLORS=['#16a34a','#dc2626','#2563eb','#f59e0b','#0891b2','#9333ea','#ea580c','#db2777','#0d9488','#4b5563'];
@@ -277,7 +277,11 @@ async function vSmart(key){
 
 async function vScan(params){
   setTitle('Escanear',true);tab('scan');
-  view.innerHTML=`<div id="reader"></div><p class="muted" style="text-align:center;margin:8px 0" id="scanMsg">Apunta al código de barras del producto</p>
+  view.innerHTML=`<div class="scanwrap" id="scanwrap"><div class="cam"><div class="frame"><i></i></div><div class="focus-ring"></div>
+    <div class="camctl"><button type="button" class="cbtn" id="torchBtn" hidden aria-label="Linterna">🔦</button><button type="button" class="cbtn" id="camBtn" hidden aria-label="Cambiar cámara">🔄</button><span class="eng" id="engine"></span></div>
+    <div class="zoomwrap" id="zoomWrap" hidden><button type="button" class="cbtn" data-z="1">1×</button><button type="button" class="cbtn" data-z="2">2×</button><input type="range" id="zoom"><b id="zoomLbl">1×</b></div></div></div>
+  <p class="scanhint" id="scanMsg">📏 Aleja un poco el móvil (15-20 cm) y usa el zoom. Toca la imagen para enfocar.</p>
+  <label class="btn block" style="margin:0 0 12px">📸 Hacer foto del código<input type="file" id="snap" accept="image/*" capture="environment" hidden></label>
   <div class="card"><label style="margin-top:0">¿No lee el código? Escríbelo</label><div class="row"><input id="code" inputmode="numeric" pattern="[0-9]*" placeholder="Ej. 3017620422003"><button class="btn" style="flex:none" id="go">Buscar</button></div>
   <label>O busca por nombre</label><div class="row"><input id="name" type="search" placeholder="Ej. yogur griego"><button class="btn sec" style="flex:none" id="goName">Buscar</button></div></div>
   <a class="btn ghost block" href="#/manual">✍️ No está: añadirlo a mano</a>`;
@@ -285,20 +289,18 @@ async function vScan(params){
   $('#go').onclick=()=>go($('#code').value);$('#code').onkeydown=e=>{if(e.key==='Enter')go(e.target.value)};
   const gn=()=>{const q=$('#name').value.trim();if(q){stopScan();location.hash='#/buscar?online=1&q='+encodeURIComponent(q)}};
   $('#goName').onclick=gn;$('#name').onkeydown=e=>{if(e.key==='Enter')gn()};
-  startScan(go);
+  $('#snap').onchange=async e=>{const f=e.target.files[0];e.target.value='';if(!f)return;const m=$('#scanMsg');m.textContent='🔎 Leyendo el código de la foto…';
+    try{const c=await Scanner.decodeImage(f);if(c){navigator.vibrate&&navigator.vibrate(80);go(c)}else m.innerHTML='⚠️ No se ve el código en la foto. Hazla de cerca pero <b>nítida</b>, con el código recto y bien iluminado, o escribe los números.'}catch(err){m.textContent='⚠️ No se pudo leer la foto'}};
+  const ui={torchBtn:$('#torchBtn'),camBtn:$('#camBtn'),engine:$('#engine'),zoom:$('#zoom'),zoomWrap:$('#zoomWrap'),zoomLbl:$('#zoomLbl')};
+  $('#torchBtn').onclick=()=>Scanner.toggleTorch();$('#camBtn').onclick=()=>Scanner.nextCamera();
+  ui.zoom.oninput=e=>Scanner.setZoom(e.target.value);
+  $('#zoomWrap').onclick=e=>{const b=e.target.closest('[data-z]');if(b)Scanner.setZoom(b.dataset.z)};
+  $('#scanwrap .cam').addEventListener('click',e=>{if(e.target.closest('.camctl,.zoomwrap'))return;Scanner.tapFocus(e)});
+  if(!window.isSecureContext||!navigator.mediaDevices?.getUserMedia){$('#scanMsg').textContent='La cámara en vivo no está disponible aquí: usa "Hacer foto del código".';$('#scanwrap').hidden=true;return}
+  try{await Scanner.start($('#scanwrap'),go,ui)}
+  catch(e){console.warn(e);$('#scanwrap').hidden=true;$('#scanMsg').innerHTML=e&&e.name==='NotAllowedError'?'⚠️ Sin permiso de cámara. Actívalo en los ajustes del navegador, o usa "Hacer foto del código".':'⚠️ No se pudo abrir la cámara. Usa "Hacer foto del código" o escribe los números.'}
 }
-async function startScan(onCode){
-  if(!window.Html5Qrcode){$('#scanMsg').textContent='Cargando escáner…';await new Promise(r=>setTimeout(r,600));if(!window.Html5Qrcode)return}
-  if(!window.isSecureContext){$('#scanMsg').textContent='La cámara necesita HTTPS';return}
-  try{
-    const F=Html5QrcodeSupportedFormats;
-    scanner=new Html5Qrcode('reader',{formatsToSupport:[F.EAN_13,F.EAN_8,F.UPC_A,F.UPC_E,F.CODE_128,F.CODE_39,F.ITF],useBarCodeDetectorIfSupported:true,verbose:false});
-    let done=false;
-    await scanner.start({facingMode:'environment'},{fps:12,qrbox:(w,h)=>({width:Math.min(w*0.85,340),height:Math.min(h*0.5,170)}),aspectRatio:1.333},
-      txt=>{if(done)return;done=true;navigator.vibrate&&navigator.vibrate(80);onCode(txt)},()=>{});
-  }catch(e){console.warn(e);$('#scanMsg').innerHTML='⚠️ No se pudo abrir la cámara. Revisa el permiso de cámara del navegador o escribe el código abajo.';$('#reader').style.minHeight='0'}
-}
-async function stopScan(){const s=scanner;scanner=null;if(s){try{if(s.isScanning)await s.stop();s.clear()}catch(e){}}}
+async function stopScan(){await Scanner.stop()}
 
 async function vLookup(code,params){
   setTitle('Producto',true);tab('scan');
@@ -423,3 +425,5 @@ setInterval(()=>checkUpdate(false),30*60*1000);
 if(navigator.storage?.persist)navigator.storage.persist().catch(()=>{});
 
 ensureDefaults().then(route);
+// cámara: soltarla al salir de la app y reabrirla al volver a la pantalla de escanear
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden'){if(Scanner.active())Scanner.stop()}else if(location.hash.startsWith('#/scan')&&!Scanner.active())route()});

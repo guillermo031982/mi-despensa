@@ -5,7 +5,7 @@
 PWA personal (en español) para complementar a Yuka: escanea el código de barras, consulta Open Food Facts / Open Beauty Facts y guarda el producto en **tus propias categorías** (Embutidos, Yogures, Cosmética…) con tu valoración (1-5 ★ y Bueno/Regular/Evitar) y notas.
 
 - Sin servidor ni build: HTML + CSS + JS estático. Datos en IndexedDB del navegador; copia de seguridad en JSON desde Ajustes.
-- Escáner: [html5-qrcode](https://github.com/mebjas/html5-qrcode) 2.3.8 (Apache-2.0), usa BarcodeDetector nativo cuando existe. Requiere HTTPS.
+- Escáner: propio (`scanner.js`) con BarcodeDetector nativo (Android Chrome) y [ZXing](https://github.com/zxing-js/library) 0.21.3 (Apache-2.0) como respaldo; enfoque continuo, toque para enfocar, zoom, linterna y lectura desde foto. Requiere HTTPS.
 - Auto-actualización: service worker con caché versionada, red primero para la app, `skipWaiting` + `clients.claim`, y comprobación de `version.json` al abrir, al volver a la app y cada 30 min.
 
 ## Publicar una versión nueva
