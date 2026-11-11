@@ -110,3 +110,7 @@ summary{font-weight:700;cursor:pointer;min-height:28px}
 .zoomwrap{position:absolute;left:8px;right:8px;bottom:8px;display:flex;gap:8px;align-items:center;background:#0007;border-radius:28px;padding:4px 10px 4px 4px;color:#fff}
 .zoomwrap input{flex:1;min-height:0;padding:0;border:0;background:none;accent-color:#22c55e}.zoomwrap .cbtn{height:40px;min-width:44px;font-size:15px;background:#fff3}
 .scanhint{text-align:center;margin:10px 4px;font-weight:600;color:#374151}
+.req{color:#dc2626}
+.fhint{font-size:13px;color:#92400e;background:#fef3c7;border-radius:8px;padding:6px 10px;margin-top:6px}
+input.invalid,input.invalid:focus{outline:none;border-width:2px;border-color:#dc2626!important;box-shadow:0 0 0 4px rgba(220,38,38,.3)!important;animation:shake .35s}
+@keyframes shake{25%{transform:translateX(-5px)}75%{transform:translateX(5px)}}

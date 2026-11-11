@@ -1,5 +1,5 @@
 /* Alimentos Sanos — complemento personal a Yuka. Vanilla JS, datos en IndexedDB (db.js). */
-const APP_VERSION='1.0.4';
+const APP_VERSION='1.0.5';
 const $=(s,r=document)=>r.querySelector(s);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,8);
@@ -27,7 +27,7 @@ async function ensureDefaults(){
 }
 
 /* ---------- Open Food Facts ---------- */
-const FIELDS='code,product_name,product_name_es,generic_name_es,brands,quantity,image_front_url,image_url,image_front_small_url,ingredients_text_es,ingredients_text,nutriscore_grade,nova_group,ecoscore_grade,additives_tags,allergens_tags,traces_tags,categories,labels,nutriments,nutrition_data_per';
+const FIELDS='code,product_name,product_name_es,generic_name,generic_name_es,brands,quantity,image_front_url,image_url,image_front_small_url,ingredients_text_es,ingredients_text,nutriscore_grade,nova_group,ecoscore_grade,additives_tags,allergens_tags,traces_tags,categories,labels,nutriments,nutrition_data_per';
 async function lookup(code){
   for(const [src,host] of [['off','world.openfoodfacts.org'],['obf','world.openbeautyfacts.org']]){
     try{
@@ -39,9 +39,11 @@ async function lookup(code){
   }
   return null;
 }
+/* nombre de OFF: primero en español, luego genérico y, si no hay nada, la marca */
+function offName(p){for(const k of ['product_name_es','product_name','generic_name_es','generic_name']){const v=(p[k]||'').trim();if(v)return v}return (p.brands||'').split(',')[0].trim()}
 function normalize(p,code,src){
   const g=v=>v&&v!=='unknown'&&v!=='not-applicable'?v:'';
-  return {code:p.code||code,src,name:p.product_name_es||p.product_name||p.generic_name_es||'',brand:(p.brands||'').split(',')[0].trim(),quantity:p.quantity||'',
+  return {code:p.code||code,src,name:offName(p),brand:(p.brands||'').split(',')[0].trim(),quantity:p.quantity||'',
     image:p.image_front_url||p.image_url||p.image_front_small_url||'',ingredients:p.ingredients_text_es||p.ingredients_text||'',
     nutriscore:g(p.nutriscore_grade),nova:p.nova_group||'',ecoscore:g(p.ecoscore_grade),
     additives:(p.additives_tags||[]).map(t=>t.replace(/^\w\w:/,'').toUpperCase()),
@@ -51,9 +53,9 @@ function normalize(p,code,src){
 }
 async function searchOnline(q){
   // 1º buscador nuevo de OFF (search-a-licious), 2º buscador clásico
-  try{const r=await fetch(`https://search.openfoodfacts.org/search?q=${encodeURIComponent(q)}&page_size=24&langs=es&fields=code,product_name,product_name_es,brands,image_front_small_url,nutriscore_grade`);
+  try{const r=await fetch(`https://search.openfoodfacts.org/search?q=${encodeURIComponent(q)}&page_size=24&langs=es&fields=code,product_name,product_name_es,generic_name,generic_name_es,brands,image_front_small_url,nutriscore_grade`);
     if(r.ok){const j=await r.json();return (j.hits||[]).map(h=>({...h,brands:Array.isArray(h.brands)?h.brands.join(', '):h.brands}))}}catch(e){}
-  const u=`https://world.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(q)}&search_simple=1&action=process&json=1&page_size=24&lc=es&fields=code,product_name,product_name_es,brands,image_front_small_url,nutriscore_grade`;
+  const u=`https://world.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(q)}&search_simple=1&action=process&json=1&page_size=24&lc=es&fields=code,product_name,product_name_es,generic_name,generic_name_es,brands,image_front_small_url,nutriscore_grade`;
   const r=await fetch(u);if(!r.ok)throw new Error('http '+r.status);return (await r.json()).products||[];
 }
 
@@ -167,8 +169,9 @@ function infoBlock(p){
 async function saveForm(p,isNew){
   const cs=await cats();
   return `<div class="card"><h3 style="margin:0 0 4px">${isNew?'Guardar en mis productos':'Mi clasificación'}</h3>
-  ${p.src==='manual'||!isNew?`<label>Nombre</label><input id="f-name" value="${esc(p.name)}" placeholder="Nombre del producto">
-  <label>Marca</label><input id="f-brand" value="${esc(p.brand||'')}" placeholder="Marca (opcional)">`:''}
+  <label for="f-name">Nombre <span class="req">*</span></label><input id="f-name" value="${esc(p.name||'')}" placeholder="Escribe el nombre del producto" autocomplete="off" enterkeyhint="next">
+  ${p.name?'':'<div class="fhint" id="f-name-hint">Open Food Facts no tiene el nombre de este producto: escríbelo aquí.</div>'}
+  <label for="f-brand">Marca</label><input id="f-brand" value="${esc(p.brand||'')}" placeholder="Marca (opcional)" autocomplete="off">
   <label>Categoría</label><div class="row"><select id="f-cat"><option value="">Sin categoría</option>${cs.map(c=>`<option value="${c.id}" ${c.id===p.cat?'selected':''}>${esc((c.emoji||'')+' '+c.name)}</option>`).join('')}</select>
   <button class="btn sec" style="flex:none" id="f-newcat" type="button">＋ Nueva</button></div>
   <label>Mi valoración</label><div class="stars" id="f-stars">${[1,2,3,4,5].map(i=>`<button type="button" data-v="${i}" class="${(p.rating||0)>=i?'on':''}" aria-label="${i} estrellas">★</button>`).join('')}</div>
@@ -185,12 +188,13 @@ function bindForm(p,onSaved){
   $('#f-stars').onclick=e=>{const b=e.target.closest('button');if(!b)return;const v=+b.dataset.v;rating=rating===v?0:v;[...$('#f-stars').children].forEach(x=>x.classList.toggle('on',+x.dataset.v<=rating))};
   $('#f-verd').onclick=e=>{const b=e.target.closest('button');if(!b)return;verdict=verdict===b.dataset.v?'':b.dataset.v;[...$('#f-verd').children].forEach(x=>x.classList.toggle('on',x.dataset.v===verdict))};
   $('#f-photo').onchange=async e=>{const f=e.target.files[0];if(!f)return;photo=await shrink(f);const pv=$('#f-prev');pv.src=photo;pv.hidden=false};
+  const fn=$('#f-name');fn.oninput=()=>{fn.classList.remove('invalid');const h=document.querySelector('.hero h3');if(h)h.textContent=fn.value.trim()||'(sin nombre)'};
+  if(!fn.value)setTimeout(()=>{fn.scrollIntoView({block:'center'});fn.focus({preventScroll:true})},300);
   $('#f-newcat').onclick=async()=>{const c=await editCat();if(c){const s=$('#f-cat');s.add(new Option((c.emoji||'')+' '+c.name,c.id));s.value=c.id}};
   $('#f-save').onclick=async()=>{
     const o={...p};
-    if($('#f-name'))o.name=$('#f-name').value.trim();
-    if($('#f-brand'))o.brand=$('#f-brand').value.trim();
-    if(!o.name){toast('Ponle un nombre');return}
+    o.name=$('#f-name').value.trim();o.brand=$('#f-brand').value.trim();
+    if(!o.name){const f=$('#f-name');f.classList.add('invalid');f.scrollIntoView({block:'center',behavior:'smooth'});setTimeout(()=>f.focus({preventScroll:true}),250);toast('Escribe el nombre arriba ✏️');return}
     o.cat=$('#f-cat').value||null;o.rating=rating;o.verdict=verdict;o.photo=photo;o.notes=$('#f-notes').value.trim();const nn=getNutr();o.nutr=nn.nutr;o.smart=nn.smart;
     o.id=o.id||uid();o.created=o.created||Date.now();o.updated=Date.now();
     await DB.put('prods',o);toast('✓ Guardado');onSaved(o);
@@ -346,7 +350,7 @@ async function vBuscar(params){
       res.innerHTML=l.length?`<div class="muted" style="margin-bottom:8px">${l.length} resultado${l.length===1?'':'s'}</div><div class="plist">${l.map(p=>pItem(p,cm)).join('')}</div>`:`<div class="empty"><div class="big">🔎</div>${ps.length?'Nada coincide.':'Aún no tienes productos guardados.'}</div>`;return}
     if(q.length<2){res.innerHTML='<div class="empty">Escribe al menos 2 letras y pulsa buscar.</div>';return}
     res.innerHTML='<div class="empty"><div class="big">⏳</div>Buscando en Open Food Facts…</div>';
-    try{const l=await searchOnline(q);res.innerHTML=l.length?`<div class="plist">${l.map(p=>`<a class="pitem" href="#/lookup/${esc(p.code)}">${p.image_front_small_url?`<img loading="lazy" src="${esc(p.image_front_small_url)}">`:'<div class="noimg">📦</div>'}<div class="info"><b>${esc(p.product_name_es||p.product_name||'(sin nombre)')}</b><small>${esc(p.brands||'')} · ${esc(p.code)}</small><div class="badges">${nsBadge(p.nutriscore_grade)}</div></div></a>`).join('')}</div>`:'<div class="empty">Sin resultados.</div>'}
+    try{const l=await searchOnline(q);res.innerHTML=l.length?`<div class="plist">${l.map(p=>`<a class="pitem" href="#/lookup/${esc(p.code)}">${p.image_front_small_url?`<img loading="lazy" src="${esc(p.image_front_small_url)}">`:'<div class="noimg">📦</div>'}<div class="info"><b>${esc(offName(p)||'(sin nombre)')}</b><small>${esc(p.brands||'')} · ${esc(p.code)}</small><div class="badges">${nsBadge(p.nutriscore_grade)}</div></div></a>`).join('')}</div>`:'<div class="empty">Sin resultados.</div>'}
     catch(e){res.innerHTML='<div class="empty"><div class="big">📡</div>No se pudo buscar (¿sin conexión?). La búsqueda de Open Food Facts a veces va lenta: reinténtalo.</div>'}
   };
   $('#t-local').onclick=()=>{online=false;draw()};$('#t-online').onclick=()=>{online=true;draw()};
