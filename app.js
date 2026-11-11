@@ -1,5 +1,5 @@
 /* Alimentos Sanos — complemento personal a Yuka. Vanilla JS, datos en IndexedDB (db.js). */
-const APP_VERSION='1.0.2';
+const APP_VERSION='1.0.3';
 const $=(s,r=document)=>r.querySelector(s);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,8);
@@ -27,7 +27,7 @@ async function ensureDefaults(){
 }
 
 /* ---------- Open Food Facts ---------- */
-const FIELDS='code,product_name,product_name_es,generic_name_es,brands,quantity,image_front_url,image_url,image_front_small_url,ingredients_text_es,ingredients_text,nutriscore_grade,nova_group,ecoscore_grade,additives_tags,allergens_tags,traces_tags,categories,labels';
+const FIELDS='code,product_name,product_name_es,generic_name_es,brands,quantity,image_front_url,image_url,image_front_small_url,ingredients_text_es,ingredients_text,nutriscore_grade,nova_group,ecoscore_grade,additives_tags,allergens_tags,traces_tags,categories,labels,nutriments,nutrition_data_per';
 async function lookup(code){
   for(const [src,host] of [['off','world.openfoodfacts.org'],['obf','world.openbeautyfacts.org']]){
     try{
@@ -47,7 +47,7 @@ function normalize(p,code,src){
     additives:(p.additives_tags||[]).map(t=>t.replace(/^\w\w:/,'').toUpperCase()),
     allergens:(p.allergens_tags||[]).map(t=>{const k=t.replace(/^\w\w:/,'');return ALLERG[k]||k}),
     traces:(p.traces_tags||[]).map(t=>{const k=t.replace(/^\w\w:/,'');return ALLERG[k]||k}),
-    offCategories:p.categories||'',labels:p.labels||''};
+    offCategories:p.categories||'',labels:p.labels||'',nutr:offNutr(p)};
 }
 async function searchOnline(q){
   // 1º buscador nuevo de OFF (search-a-licious), 2º buscador clásico
@@ -56,17 +56,95 @@ async function searchOnline(q){
   const u=`https://world.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(q)}&search_simple=1&action=process&json=1&page_size=24&lc=es&fields=code,product_name,product_name_es,brands,image_front_small_url,nutriscore_grade`;
   const r=await fetch(u);if(!r.ok)throw new Error('http '+r.status);return (await r.json()).products||[];
 }
+
+/* ---------- Nutrición: regla de la fibra + declaraciones UE ---------- */
+const fmt=v=>v==null||v===''?'—':String(Math.round(+v*100)/100).replace('.',',');
+const pnum=v=>{v=String(v??'').trim().replace(',','.');return v===''||isNaN(+v)?null:+v};
+const SMART={fibra:{t:'Cumple regla de la fibra',e:'🌾',c:'#b45309',d:'Fibra × 5 ≥ hidratos de carbono (por 100 g o 100 ml). Ordenados de mejor a peor proporción fibra/hidratos.'},
+  altoFibra:{t:'Alto en fibra',e:'🥦',c:'#15803d',d:'Reglamento UE 1924/2006: al menos 6 g de fibra por 100 g o 3 g por 100 kcal.'},
+  altoProteina:{t:'Alto en proteína',e:'💪',c:'#7c3aed',d:'Reglamento UE 1924/2006: las proteínas aportan al menos el 20 % de la energía (proteína × 4 / kcal).'}};
+const SRC={off:'Open Food Facts',obf:'Open Beauty Facts',etiqueta:'Etiqueta escaneada',manual:'Escrito a mano'};
+function offNutr(p){
+  const n=p.nutriments||{};const g=k=>n[k]==null||n[k]===''?null:Math.round(+n[k]*100)/100;
+  let kcal=g('energy-kcal_100g');if(kcal==null&&n['energy_100g']!=null&&(n['energy_unit']||'kJ').toLowerCase()==='kj')kcal=Math.round(+n['energy_100g']/4.184);
+  const o={fiber:g('fiber_100g'),carbs:g('carbohydrates_100g'),protein:g('proteins_100g'),kcal:kcal==null?null:Math.round(kcal),fat:g('fat_100g')};
+  if(Object.values(o).every(v=>v==null))return null;
+  o.base=/(^|\d|\s)(ml|cl|l)\b/i.test(p.quantity||'')||/ml/.test(p.nutrition_data_per||'')?'100 ml':'100 g';o.source='off';return o;
+}
+function smartBadges(p){
+  if(!p.nutr&&!p.smart)return '';const s=NUTR.sections(p);
+  return (s.fibra?`<span class="badge sb-fibra">🌾 Regla fibra</span>`:'')+(s.altoFibra?`<span class="badge sb-fib">🥦 Alto en fibra</span>`:'')+(s.altoProteina?`<span class="badge sb-pro">💪 Alto en proteína</span>`:'');
+}
+function nutrEvalHTML(n){
+  n=n||{};const e=NUTR.evaluate(n),b=n.base||'100 g',f=pnum(n.fiber),c=pnum(n.carbs);
+  let rule;
+  if(e.rule==null)rule=`<div class="ev unk">❔ <b>Regla de la fibra:</b> ${f==null?'falta la fibra':'faltan los hidratos'}, no se puede saber (fibra sin dato ≠ 0).</div>`;
+  else if(c===0)rule=`<div class="ev ${e.rule?'ok':'ko'}">${e.rule?'✅':'❌'} <b>Regla de la fibra:</b> 0 g de hidratos ${e.rule?'y tiene fibra: cumple':'y sin fibra: no cumple'}.</div>`;
+  else rule=`<div class="ev ${e.rule?'ok':'ko'}">${e.rule?'✅ <b>Cumple</b>':'❌ <b>No cumple</b>'} la regla de la fibra: ${fmt(f)} g × 5 = ${fmt(f*5)} g ${e.rule?'≥':'<'} ${fmt(c)} g de hidratos <span class="muted">(1 g de fibra por cada ${fmt(c/f||0)} g de hidratos)</span>.</div>`;
+  const fl={alto:'🥦 <b>Alto en fibra</b> (≥ 6 g/100 g o ≥ 3 g/100 kcal)',fuente:'🌱 <b>Fuente de fibra</b> (≥ 3 g/100 g o ≥ 1,5 g/100 kcal)',no:'Fibra: no llega a "fuente de fibra" (UE)'}[e.fiber]||'Fibra (UE): sin datos';
+  const ps=e.proteinShare;const pl=e.protein==null?`Proteína (UE): ${pnum(n.kcal)?'falta la proteína':'faltan las kcal'} para calcularlo`:`${{alto:'💪 <b>Alto en proteínas</b>',fuente:'🥚 <b>Fuente de proteínas</b>',no:'Proteínas: no es fuente de proteínas'}[e.protein]}: aportan el ${fmt(Math.round(ps*1000)/10)} % de la energía <span class="muted">(alto ≥ 20 %, fuente ≥ 12 %)</span>`;
+  const w=NUTR.warnings(n).map(x=>`<div class="ev warn">⚠️ ${esc(x)}</div>`).join('');
+  return rule+`<div class="ev ${e.fiber==='alto'||e.fiber==='fuente'?'ok':'unk'}">${fl}</div><div class="ev ${e.protein==='alto'||e.protein==='fuente'?'ok':'unk'}">${pl}</div>${w}<div class="muted" style="font-size:12px;margin-top:4px">Valores por ${esc(b)}. Nunca se usan los azúcares como hidratos.</div>`;
+}
+function nutrSection(p){
+  const n=p.nutr||{},s=NUTR.sections(p);
+  const fld=(k,l,u)=>`<div><label for="n-${k}">${l}</label><input id="n-${k}" data-k="${k}" inputmode="decimal" placeholder="${u}" value="${n[k]==null?'':String(n[k]).replace('.',',')}"></div>`;
+  return `<div class="nutr"><h3 style="margin:16px 0 2px">🥦 Fibra y proteína</h3>
+  <div class="muted" id="n-src" style="font-size:13px">${n.source?'Fuente: '+SRC[n.source]:'Sin datos nutricionales: escanea la etiqueta o escríbelos'}</div>
+  <div class="row" style="margin-top:8px"><button type="button" class="btn sec" id="n-scan">📷 Escanear etiqueta</button><label class="btn ghost" style="margin:0;flex:none;padding:0 14px" title="Elegir foto">🖼️<input type="file" id="n-file2" accept="image/*" hidden></label></div>
+  <input type="file" id="n-file" accept="image/*" capture="environment" hidden>
+  ${p.code&&p.src!=='manual'?`<button type="button" class="btn ghost block" id="n-off" style="margin-top:8px">⬇️ Traer valores de Open Food Facts</button>`:''}
+  <div id="n-ocr"></div>
+  <label>Valores por</label><select id="n-base"><option ${n.base!=='100 ml'?'selected':''}>100 g</option><option ${n.base==='100 ml'?'selected':''}>100 ml</option></select>
+  <div class="ngrid">${fld('fiber','Fibra (g)','g')}${fld('carbs','Hidratos (g)','g')}${fld('protein','Proteínas (g)','g')}${fld('kcal','Energía (kcal)','kcal')}</div>
+  <input type="hidden" id="n-fat" value="${n.fat==null?'':n.fat}">
+  <div id="n-res" class="nres"></div>
+  <label>Guardar también en las secciones</label>
+  <div class="smartchk">${Object.entries(SMART).map(([k,v])=>`<label class="chk"><input type="checkbox" data-s="${k}" ${s[k]?'checked':''}> ${v.e} ${v.t}</label>`).join('')}</div>
+  <div class="muted" style="font-size:12px">Se marcan solas según los valores; puedes cambiarlas a mano.</div></div>`;
+}
+function bindNutr(p){
+  let source=p.nutr&&p.nutr.source||null;const touched=new Set(Object.keys(p.smart||{}));
+  const read=()=>{const o={base:$('#n-base').value,source};for(const k of ['fiber','carbs','protein','kcal'])o[k]=pnum($('#n-'+k).value);o.fat=pnum($('#n-fat').value);return o};
+  const has=o=>['fiber','carbs','protein','kcal'].some(k=>o[k]!=null);
+  const refresh=()=>{const o=read();$('#n-res').innerHTML=has(o)?nutrEvalHTML(o):'';
+    const auto=NUTR.sections({nutr:o});document.querySelectorAll('.smartchk input').forEach(c=>{if(!touched.has(c.dataset.s))c.checked=auto[c.dataset.s]})};
+  document.querySelectorAll('.ngrid input').forEach(i=>i.addEventListener('input',()=>{i.classList.remove('ocr','warn');if(source!=='etiqueta'||!i.dataset.edited){i.dataset.edited=1}if(!source||source==='off')source='manual';$('#n-src').textContent='Fuente: '+SRC[source];refresh()}));
+  $('#n-base').onchange=refresh;
+  document.querySelectorAll('.smartchk input').forEach(c=>c.onchange=()=>touched.add(c.dataset.s));
+  const setVals=(o,cls)=>{for(const k of ['fiber','carbs','protein','kcal']){const i=$('#n-'+k);if(o[k]!=null){i.value=String(o[k]).replace('.',',');i.classList.add(cls)}}if(o.fat!=null)$('#n-fat').value=o.fat;if(o.base)$('#n-base').value=o.base};
+  const scan=async f=>{if(!f)return;const box=$('#n-ocr');
+    box.innerHTML=`<div class="ocrbox"><img src="${URL.createObjectURL(f)}" alt=""><div style="flex:1"><b id="n-pmsg">Preparando lector…</b><div class="pbar"><i id="n-pbar"></i></div><small class="muted">Se lee en el móvil, sin enviar la foto a ningún sitio.</small></div></div>`;
+    try{const r=await OCR.read(f,(v,m)=>{const b=$('#n-pbar');if(b)b.style.width=Math.round(v*100)+'%';const t=$('#n-pmsg');if(t&&m)t.textContent=m});
+      document.querySelectorAll('.ngrid input').forEach(i=>i.classList.remove('ocr','warn'));
+      setVals(r,'ocr');(r.uncertain||[]).forEach(k=>{const i=$('#n-'+k);if(i)i.classList.add('warn')});
+      source='etiqueta';$('#n-src').textContent='Fuente: '+SRC.etiqueta;
+      const L={fiber:'fibra',carbs:'hidratos',protein:'proteínas',kcal:'kcal'};
+      const miss=Object.keys(L).filter(k=>r[k]==null).map(k=>L[k]);const unc=(r.uncertain||[]).filter(k=>r[k]!=null).map(k=>L[k]);
+      box.querySelector('.ocrbox>div').innerHTML=`<b>${r.found.length?'✓ Etiqueta leída':'No se ha podido leer la tabla'}</b><small>Comprueba los valores con la foto antes de guardar${r.base?' · columna '+esc(r.base):''}.</small>
+        ${unc.length?`<small class="w">Lectura dudosa: ${unc.join(', ')}</small>`:''}${miss.length?`<small class="w">No encontrado: ${miss.join(', ')} (escríbelo si aparece)</small>`:''}${r.notes.some(n=>/kJ/.test(n))?'<small>kcal calculadas desde kJ</small>':''}${!r.headerFound&&r.found.length?'<small class="w">No vi la cabecera "por 100 g": confirma que es esa columna</small>':''}`;
+      refresh();
+    }catch(e){box.innerHTML=`<div class="ev warn">⚠️ ${esc(e.message||'No se pudo leer')}. Puedes escribir los valores a mano.</div>`}};
+  $('#n-scan').onclick=()=>$('#n-file').click();
+  $('#n-file').onchange=e=>{scan(e.target.files[0]);e.target.value=''};$('#n-file2').onchange=e=>{scan(e.target.files[0]);e.target.value=''};
+  if($('#n-off'))$('#n-off').onclick=async()=>{const b=$('#n-off');b.textContent='Buscando…';try{const q=await lookup(p.code);const o=q&&q.nutr;if(!o){b.textContent='Open Food Facts no tiene estos valores';return}
+    setVals(o,'ocr');source='off';$('#n-src').textContent='Fuente: '+SRC.off;b.textContent='✓ Valores de Open Food Facts';refresh()}catch(e){b.textContent='Sin conexión'}};
+  refresh();
+  return ()=>{const o=read();const smart={};document.querySelectorAll('.smartchk input').forEach(c=>{if(touched.has(c.dataset.s))smart[c.dataset.s]=c.checked});
+    return {nutr:has(o)?o:null,smart:Object.keys(smart).length?smart:null}};
+}
+
 /* ---------- Componentes ---------- */
 const nsBadge=g=>g&&/^[a-e]$/.test(g)?`<span class="badge ns ns-${g}">Nutri-Score ${g.toUpperCase()}</span>`:'';
 const novaBadge=n=>n?`<span class="badge nova${n}">NOVA ${n}</span>`:'';
 const vBadge=v=>v?`<span class="badge v-${v}">${VERD[v]}</span>`:'';
 const starsTxt=n=>n?'★'.repeat(n)+'☆'.repeat(5-n):'';
 function imgOf(p){return p.photo||p.image||''}
-function pItem(p,catMap){
+function pItem(p,catMap,extra){
   const im=imgOf(p);const c=catMap&&catMap[p.cat];
   return `<a class="pitem" href="#/p/${p.id}">${im?`<img loading="lazy" src="${esc(im)}" alt="">`:`<div class="noimg">📦</div>`}
   <div class="info"><b>${esc(p.name||'(sin nombre)')}</b><small>${esc(p.brand||'')}${c?` · ${esc(c.emoji||'')} ${esc(c.name)}`:''}${p.rating?` · <span style="color:#f59e0b">${starsTxt(p.rating)}</span>`:''}</small>
-  <div class="badges">${vBadge(p.verdict)}${nsBadge(p.nutriscore)}${novaBadge(p.nova)}</div></div></a>`;
+  <div class="badges">${vBadge(p.verdict)}${nsBadge(p.nutriscore)}${novaBadge(p.nova)}${smartBadges(p)}</div>${extra||''}</div></a>`;
 }
 function infoBlock(p){
   const sc=[];
@@ -98,11 +176,12 @@ async function saveForm(p,isNew){
   <label>Foto propia ${p.photo?'':'(opcional)'}</label>
   <input type="file" id="f-photo" accept="image/*" capture="environment">
   ${p.photo?`<img class="photo-prev" id="f-prev" src="${p.photo}">`:'<img class="photo-prev" id="f-prev" hidden>'}
+  ${nutrSection(p)}
   <label>Notas</label><textarea id="f-notes" placeholder="Dónde lo compro, precio, sabor, por qué sí o no...">${esc(p.notes||'')}</textarea>
   <div style="height:12px"></div><button class="btn block" id="f-save">💾 ${isNew?'Guardar':'Guardar cambios'}</button></div>`;
 }
 function bindForm(p,onSaved){
-  let rating=p.rating||0,verdict=p.verdict||'',photo=p.photo||'';
+  let rating=p.rating||0,verdict=p.verdict||'',photo=p.photo||'';const getNutr=bindNutr(p);
   $('#f-stars').onclick=e=>{const b=e.target.closest('button');if(!b)return;const v=+b.dataset.v;rating=rating===v?0:v;[...$('#f-stars').children].forEach(x=>x.classList.toggle('on',+x.dataset.v<=rating))};
   $('#f-verd').onclick=e=>{const b=e.target.closest('button');if(!b)return;verdict=verdict===b.dataset.v?'':b.dataset.v;[...$('#f-verd').children].forEach(x=>x.classList.toggle('on',x.dataset.v===verdict))};
   $('#f-photo').onchange=async e=>{const f=e.target.files[0];if(!f)return;photo=await shrink(f);const pv=$('#f-prev');pv.src=photo;pv.hidden=false};
@@ -112,7 +191,7 @@ function bindForm(p,onSaved){
     if($('#f-name'))o.name=$('#f-name').value.trim();
     if($('#f-brand'))o.brand=$('#f-brand').value.trim();
     if(!o.name){toast('Ponle un nombre');return}
-    o.cat=$('#f-cat').value||null;o.rating=rating;o.verdict=verdict;o.photo=photo;o.notes=$('#f-notes').value.trim();
+    o.cat=$('#f-cat').value||null;o.rating=rating;o.verdict=verdict;o.photo=photo;o.notes=$('#f-notes').value.trim();const nn=getNutr();o.nutr=nn.nutr;o.smart=nn.smart;
     o.id=o.id||uid();o.created=o.created||Date.now();o.updated=Date.now();
     await DB.put('prods',o);toast('✓ Guardado');onSaved(o);
   };
@@ -141,6 +220,7 @@ async function vHome(){
   setTitle('Alimentos Sanos');tab('home');
   const [cs,ps]=await Promise.all([cats(),prods()]);
   const count={};ps.forEach(p=>count[p.cat||'']=(count[p.cat||'']||0)+1);
+  const smartCount={fibra:0,altoFibra:0,altoProteina:0};ps.forEach(p=>{const x=NUTR.sections(p);for(const k in smartCount)if(x[k])smartCount[k]++});
   const recent=ps.sort((a,b)=>b.updated-a.updated).slice(0,5);const cm=Object.fromEntries(cs.map(c=>[c.id,c]));
   view.innerHTML=`<div class="search"><input id="q" type="search" placeholder="Buscar en mis productos" enterkeyhint="search"></div>
   <div class="row" style="margin-bottom:6px"><a class="btn" href="#/scan">📷 Escanear</a><a class="btn sec" href="#/manual">✍️ Añadir a mano</a></div>
@@ -148,6 +228,8 @@ async function vHome(){
   <div class="grid">${cs.map(c=>`<a class="cat" href="#/cat/${c.id}" style="--c:${c.color}"><span class="emo">${esc(c.emoji||'📦')}</span><div><b>${esc(c.name)}</b><br><small>${count[c.id]||0} producto${(count[c.id]||0)===1?'':'s'}</small></div></a>`).join('')}
   ${count['']?`<a class="cat" href="#/cat/none" style="--c:#9ca3af"><span class="emo">🗂️</span><div><b>Sin categoría</b><br><small>${count['']} productos</small></div></a>`:''}
   <a class="cat" href="#" id="addCat" style="--c:#d1d5db;align-items:center;justify-content:center;color:var(--g)"><span class="emo">＋</span><b>Nueva categoría</b></a></div>
+  <h2>Secciones <span class="muted" style="font-weight:400;font-size:14px">(automáticas)</span></h2>
+  <div class="grid">${Object.entries(SMART).map(([k,v])=>`<a class="cat smart" href="#/smart/${k}" style="--c:${v.c}"><span class="emo">${v.e}</span><div><b>${v.t}</b><br><small>${smartCount[k]} producto${smartCount[k]===1?'':'s'}</small></div></a>`).join('')}</div>
   ${recent.length?`<h2>Últimos guardados</h2><div class="plist">${recent.map(p=>pItem(p,cm)).join('')}</div>`:`<div class="empty"><div class="big">🛒</div>Escanea tu primer producto y guárdalo en una categoría.</div>`}`;
   $('#addCat').onclick=async e=>{e.preventDefault();if(await editCat())vHome()};
   $('#q').addEventListener('keydown',e=>{if(e.key==='Enter')location.hash='#/buscar?q='+encodeURIComponent(e.target.value)});
@@ -177,6 +259,20 @@ async function vCat(id){
     $('#del').onclick=async()=>{if(!confirm(`¿Borrar la categoría "${c.name}"? Sus ${all.length} productos pasarán a "Sin categoría" (no se borran).`))return;
       for(const p of all){p.cat=null;await DB.put('prods',p)}await DB.del('cats',id);toast('Categoría borrada');location.hash='#/'};
   }
+}
+
+
+async function vSmart(key){
+  tab('home');const S=SMART[key];if(!S){location.hash='#/';return}
+  setTitle(`${S.e} ${S.t}`,true);
+  const [cs,ps]=await Promise.all([cats(),prods()]);const cm=Object.fromEntries(cs.map(c=>[c.id,c]));
+  const l=ps.filter(p=>NUTR.sections(p)[key]);
+  const key2={fibra:p=>{const r=NUTR.fiberRatio(p.nutr?.fiber,p.nutr?.carbs);return r==null?-1:r},altoFibra:p=>p.nutr?.fiber??-1,altoProteina:p=>NUTR.proteinShare(p.nutr?.protein,p.nutr?.kcal)??-1}[key];
+  l.sort((a,b)=>key2(b)-key2(a)||(a.name||'').localeCompare(b.name||''));
+  const ex=p=>{const n=p.nutr||{};const r=NUTR.fiberRatio(n.fiber,n.carbs),sh=NUTR.proteinShare(n.protein,n.kcal);
+    const t=key==='fibra'?(r==null?'Marcado a mano':r===Infinity?`Fibra ${fmt(n.fiber)} g · 0 g hidratos`:`Fibra ${fmt(n.fiber)} g · hidratos ${fmt(n.carbs)} g · 1:${fmt(1/r)}`):key==='altoFibra'?(n.fiber!=null?`Fibra ${fmt(n.fiber)} g / ${esc(n.base||'100 g')}${n.kcal?` · ${fmt(n.fiber*100/n.kcal)} g/100 kcal`:''}`:'Marcado a mano'):(sh!=null?`Proteínas ${fmt(n.protein)} g · ${fmt(Math.round(sh*1000)/10)} % de la energía`:'Marcado a mano');
+    return `<small class="muted" style="display:block">${t}</small>`};
+  view.innerHTML=`<div class="card" style="font-size:14px">${S.d}</div><div class="plist">${l.length?l.map((p,i)=>pItem(p,cm,ex(p)).replace('<div class="info">',`<div class="info">${key==='fibra'?`<span class="rank">${i+1}</span>`:''}`)).join(''):`<div class="empty"><div class="big">${S.e}</div>Aún no hay productos aquí. Guarda productos con sus valores nutricionales (o escanea la etiqueta) y aparecerán solos.</div>`}</div>`;
 }
 
 async function vScan(params){
@@ -211,7 +307,7 @@ async function vLookup(code,params){
   let p;try{p=await lookup(code)}catch(e){view.innerHTML=`<div class="empty"><div class="big">📡</div>Sin conexión. Conéctate para consultar el producto.</div><a class="btn ghost block" href="#/manual?code=${code}">✍️ Añadirlo a mano</a>`;return}
   if(!p){view.innerHTML=`<div class="empty"><div class="big">🤷</div>El código <b>${esc(code)}</b> no está en Open Food Facts ni en Open Beauty Facts.</div><a class="btn block" href="#/manual?code=${code}">✍️ Añadirlo a mano</a><div style="height:10px"></div><a class="btn ghost block" href="#/scan">📷 Escanear otro</a>`;return}
   if(existing){view.innerHTML=infoBlock(p)+`<div class="card"><b>Ya lo tienes guardado.</b><div style="height:10px"></div><a class="btn block" href="#/p/${existing.id}">Ver mi ficha</a><div style="height:8px"></div><button class="btn sec block" id="refresh">🔄 Actualizar datos de la base</button></div>`;
-    $('#refresh').onclick=async()=>{const {photo,notes,rating,verdict,cat,id,created,name}=existing;await DB.put('prods',{...p,photo,notes,rating,verdict,cat,id,created,name:p.name||name,updated:Date.now()});toast('✓ Datos actualizados');location.hash='#/p/'+id};return}
+    $('#refresh').onclick=async()=>{const {photo,notes,rating,verdict,cat,id,created,name}=existing;const keep=existing.nutr&&existing.nutr.source!=='off'?existing.nutr:p.nutr||existing.nutr;await DB.put('prods',{...p,photo,notes,rating,verdict,cat,id,created,name:p.name||name,nutr:keep,smart:existing.smart,updated:Date.now()});toast('✓ Datos actualizados');location.hash='#/p/'+id};return}
   p.cat=params.get('cat')&&params.get('cat')!=='none'?params.get('cat'):(localStorage.getItem('md-lastcat')||null);
   view.innerHTML=infoBlock(p)+await saveForm(p,true)+`<a class="btn ghost block" href="#/scan">📷 Escanear otro</a>`;
   bindForm(p,o=>{if(o.cat)localStorage.setItem('md-lastcat',o.cat);location.hash='#/p/'+o.id});
@@ -300,7 +396,7 @@ async function route(){
   window.scrollTo(0,0);
   try{
     if(!seg.length)return vHome();
-    switch(seg[0]){case 'cat':return vCat(seg[1]);case 'scan':return vScan(params);case 'lookup':return vLookup(seg[1],params);case 'p':return vProduct(seg[1]);case 'manual':return vManual(params);case 'buscar':return vBuscar(params);case 'ajustes':return vAjustes();default:location.hash='#/'}
+    switch(seg[0]){case 'cat':return vCat(seg[1]);case 'smart':return vSmart(seg[1]);case 'scan':return vScan(params);case 'lookup':return vLookup(seg[1],params);case 'p':return vProduct(seg[1]);case 'manual':return vManual(params);case 'buscar':return vBuscar(params);case 'ajustes':return vAjustes();default:location.hash='#/'}
   }catch(e){console.error(e);view.innerHTML=`<div class="empty">Error: ${esc(e.message)}</div>`}
 }
 addEventListener('hashchange',route);
