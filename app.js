@@ -1,5 +1,5 @@
 /* Alimentos Sanos — complemento personal a Yuka. Vanilla JS, datos en IndexedDB (db.js). */
-const APP_VERSION='1.0.1';
+const APP_VERSION='1.0.2';
 const $=(s,r=document)=>r.querySelector(s);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,8);
