@@ -1,4 +1,6 @@
-# Mi Despensa
+# Alimentos Sanos
+
+(Repositorio y URL: `mi-despensa`. La base de datos local se sigue llamando `mi-despensa` para conservar los datos.)
 
 PWA personal (en español) para complementar a Yuka: escanea el código de barras, consulta Open Food Facts / Open Beauty Facts y guarda el producto en **tus propias categorías** (Embutidos, Yogures, Cosmética…) con tu valoración (1-5 ★ y Bueno/Regular/Evitar) y notas.
 

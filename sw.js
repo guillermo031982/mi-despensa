@@ -1,6 +1,6 @@
-/* Service worker de Mi Despensa. Al publicar una versión nueva, subir VERSION (y version.json y APP_VERSION en app.js).
+/* Service worker de Alimentos Sanos. Al publicar una versión nueva, subir VERSION (y version.json y APP_VERSION en app.js).
    Nunca toca IndexedDB: los datos del usuario sobreviven a las actualizaciones. */
-const VERSION='1.0.0';
+const VERSION='1.0.1';
 const CACHE='md-shell-'+VERSION;
 const IMG_CACHE='md-img';
 const SHELL=['./','./index.html','./app.css','./app.js','./db.js','./html5-qrcode.min.js','./manifest.json','./icon-192.png','./icon-512.png','./icon-maskable.png','./apple-touch-icon.png'];

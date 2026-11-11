@@ -1,5 +1,5 @@
-/* Mi Despensa — complemento personal a Yuka. Vanilla JS, datos en IndexedDB (db.js). */
-const APP_VERSION='1.0.0';
+/* Alimentos Sanos — complemento personal a Yuka. Vanilla JS, datos en IndexedDB (db.js). */
+const APP_VERSION='1.0.1';
 const $=(s,r=document)=>r.querySelector(s);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,8);
@@ -88,7 +88,7 @@ function infoBlock(p){
 /* Formulario guardar/editar (categoría, valoración, veredicto, notas) */
 async function saveForm(p,isNew){
   const cs=await cats();
-  return `<div class="card"><h3 style="margin:0 0 4px">${isNew?'Guardar en mi despensa':'Mi clasificación'}</h3>
+  return `<div class="card"><h3 style="margin:0 0 4px">${isNew?'Guardar en mis productos':'Mi clasificación'}</h3>
   ${p.src==='manual'||!isNew?`<label>Nombre</label><input id="f-name" value="${esc(p.name)}" placeholder="Nombre del producto">
   <label>Marca</label><input id="f-brand" value="${esc(p.brand||'')}" placeholder="Marca (opcional)">`:''}
   <label>Categoría</label><div class="row"><select id="f-cat"><option value="">Sin categoría</option>${cs.map(c=>`<option value="${c.id}" ${c.id===p.cat?'selected':''}>${esc((c.emoji||'')+' '+c.name)}</option>`).join('')}</select>
@@ -138,7 +138,7 @@ function editCat(c){return new Promise(res=>{
 
 /* ---------- Vistas ---------- */
 async function vHome(){
-  setTitle('Mi Despensa');tab('home');
+  setTitle('Alimentos Sanos');tab('home');
   const [cs,ps]=await Promise.all([cats(),prods()]);
   const count={};ps.forEach(p=>count[p.cat||'']=(count[p.cat||'']||0)+1);
   const recent=ps.sort((a,b)=>b.updated-a.updated).slice(0,5);const cm=Object.fromEntries(cs.map(c=>[c.id,c]));
@@ -267,7 +267,7 @@ async function vAjustes(){
   <div class="card"><h3 style="margin:0 0 6px">💾 Copia de seguridad</h3><p class="muted" style="margin:0 0 10px">Tus datos se guardan solo en este móvil (${ps.length} productos${est}). Exporta de vez en cuando un archivo para no perderlos o pasarlos a otro móvil.</p>
     <button class="btn block" id="exp">⬇️ Exportar copia (JSON)</button><div style="height:8px"></div>
     <label class="btn ghost block" style="margin:0">⬆️ Importar copia<input type="file" id="imp" accept="application/json,.json" hidden></label></div>
-  <div class="card"><h3 style="margin:0 0 6px">ℹ️ Acerca de</h3><div class="kv"><dt>Versión</dt><dd><b>${APP_VERSION}</b> <span id="updState" class="muted"></span></dd><dt>Datos</dt><dd>Open Food Facts / Open Beauty Facts (licencia ODbL)</dd><dt>Almacenamiento</dt><dd>Local (IndexedDB), no se envía a ningún servidor</dd></div>
+  <div class="card"><h3 style="margin:0 0 6px">ℹ️ Acerca de</h3><div class="kv"><dt>App</dt><dd><b>Alimentos Sanos</b></dd><dt>Versión</dt><dd><b>${APP_VERSION}</b> <span id="updState" class="muted"></span></dd><dt>Datos</dt><dd>Open Food Facts / Open Beauty Facts (licencia ODbL)</dd><dt>Almacenamiento</dt><dd>Local (IndexedDB), no se envía a ningún servidor</dd></div>
     <div style="height:10px"></div><button class="btn ghost block" id="chk">🔄 Buscar actualización</button>
     <p class="muted" style="font-size:13px">La app se actualiza sola cuando hay versión nueva. Actualizar nunca borra tus productos.</p></div>`;
   $('#addc').onclick=async()=>{if(await editCat())vAjustes()};
@@ -279,10 +279,10 @@ async function vAjustes(){
   $('#chk').onclick=()=>checkUpdate(true);
 }
 async function exportData(){
-  const data={app:'mi-despensa',version:APP_VERSION,exported:new Date().toISOString(),cats:await DB.all('cats'),prods:await DB.all('prods')};
-  const blob=new Blob([JSON.stringify(data)],{type:'application/json'});const name=`mi-despensa-${new Date().toISOString().slice(0,10)}.json`;
+  const data={app:'mi-despensa',name:'Alimentos Sanos',version:APP_VERSION,exported:new Date().toISOString(),cats:await DB.all('cats'),prods:await DB.all('prods')};
+  const blob=new Blob([JSON.stringify(data)],{type:'application/json'});const name=`alimentos-sanos-${new Date().toISOString().slice(0,10)}.json`;
   const file=new File([blob],name,{type:'application/json'});
-  if(navigator.canShare&&navigator.canShare({files:[file]})){try{await navigator.share({files:[file],title:'Copia Mi Despensa'});return}catch(e){if(e.name==='AbortError')return}}
+  if(navigator.canShare&&navigator.canShare({files:[file]})){try{await navigator.share({files:[file],title:'Copia Alimentos Sanos'});return}catch(e){if(e.name==='AbortError')return}}
   const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},1000);toast('Copia descargada');
 }
 async function importData(f){
@@ -290,7 +290,7 @@ async function importData(f){
     const replace=confirm(`Copia con ${d.prods.length} productos y ${d.cats.length} categorías.\n\nAceptar = REEMPLAZAR todo lo actual\nCancelar = AÑADIR / combinar con lo actual`);
     if(replace){await DB.clear('prods');await DB.clear('cats')}
     await DB.bulkPut('cats',d.cats);await DB.bulkPut('prods',d.prods);localStorage.setItem('md-init','1');toast('✓ Copia importada');vAjustes();
-  }catch(e){alert('Ese archivo no es una copia válida de Mi Despensa.')}
+  }catch(e){alert('Ese archivo no es una copia válida de Alimentos Sanos.')}
 }
 
 /* ---------- Router ---------- */
