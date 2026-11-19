@@ -1,5 +1,5 @@
 /* Alimentos Sanos — complemento personal a Yuka. Vanilla JS, datos en IndexedDB (db.js). */
-const APP_VERSION='1.0.6';
+const APP_VERSION='1.0.7';
 const $=(s,r=document)=>r.querySelector(s);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,8);
@@ -65,7 +65,7 @@ const pnum=v=>{v=String(v??'').trim().replace(',','.');return v===''||isNaN(+v)?
 const SMART={fibra:{t:'Cumple regla de la fibra',e:'🌾',c:'#b45309',d:'Fibra × 5 ≥ hidratos de carbono (por 100 g o 100 ml). Ordenados de mejor a peor proporción fibra/hidratos.'},
   altoFibra:{t:'Alto en fibra',e:'🥦',c:'#15803d',d:'Reglamento UE 1924/2006: al menos 6 g de fibra por 100 g o 3 g por 100 kcal.'},
   altoProteina:{t:'Alto en proteína',e:'💪',c:'#7c3aed',d:'Reglamento UE 1924/2006: las proteínas aportan al menos el 20 % de la energía (proteína × 4 / kcal).'}};
-const SRC={off:'Open Food Facts',obf:'Open Beauty Facts',etiqueta:'Etiqueta escaneada',manual:'Escrito a mano'};
+const SRC={off:'Open Food Facts',obf:'Open Beauty Facts',etiqueta:'Etiqueta escaneada',manual:'Escrito a mano',usuario:'Completado por ti (fotos)'};
 function offNutr(p){
   const n=p.nutriments||{};const g=k=>n[k]==null||n[k]===''?null:Math.round(+n[k]*100)/100;
   let kcal=g('energy-kcal_100g');if(kcal==null&&n['energy_100g']!=null&&(n['energy_unit']||'kJ').toLowerCase()==='kj')kcal=Math.round(+n['energy_100g']/4.184);
@@ -107,7 +107,7 @@ function nutrSection(p){
 }
 function bindNutr(p){
   let source=p.nutr&&p.nutr.source||null;const touched=new Set(Object.keys(p.smart||{}));
-  const read=()=>{const o={base:$('#n-base').value,source};for(const k of ['fiber','carbs','protein','kcal'])o[k]=pnum($('#n-'+k).value);o.fat=pnum($('#n-fat').value);return o};
+  const read=()=>{const o={base:$('#n-base').value,source};for(const k of ['satfat','sugars','salt'])if(p.nutr&&p.nutr[k]!=null)o[k]=p.nutr[k];for(const k of ['fiber','carbs','protein','kcal'])o[k]=pnum($('#n-'+k).value);o.fat=pnum($('#n-fat').value);return o};
   const has=o=>['fiber','carbs','protein','kcal'].some(k=>o[k]!=null);
   const refresh=()=>{const o=read();$('#n-res').innerHTML=has(o)?nutrEvalHTML(o):'';
     const auto=NUTR.sections({nutr:o});document.querySelectorAll('.smartchk input').forEach(c=>{if(!touched.has(c.dataset.s))c.checked=auto[c.dataset.s]})};
@@ -152,7 +152,10 @@ function riskCounts(items){const n=[0,0,0,0];let u=0;items.forEach(a=>a.level==n
   return [[3,'alto'],[2,'moderado'],[1,'limitado'],[0,'sin riesgo']].filter(([l])=>n[l]).map(([l,t])=>`<span class="rc" style="--c:${ADDITIVES.LEVELS[l].c}">${n[l]} ${t}</span>`).join('')+(u?`<span class="rc" style="--c:#9ca3af">${u} sin evaluar</span>`:'')}
 function quickScoreHTML(p){
   const r=SCORE.evaluate(p);
-  if(r.score==null)return `<div class="qs none"><div class="qs-c"><b>?</b></div><div class="qs-t"><b>${esc(r.reason)}</b><small>Nota rápida automática</small></div></div>`;
+  if(r.score==null){const miss=COMPLETE.missing(p);
+    return `<div class="qs none"><div class="qs-c"><b>?</b></div><div class="qs-t"><b>${esc(r.reason)}</b><small>Nota rápida automática</small></div>
+    <div class="qs-cta"><small>${miss.length?'Falta'+(miss.length>1?'n':'')+' '+esc(miss.join(' y '))+'. ':''}Haz una foto a la tabla nutricional y otra a los ingredientes: la app los lee, rellena el producto y calcula la nota.</small>
+    <button type="button" class="btn block js-complete">📷 Completar con fotos</button></div></div>`}
   const g=r.grade;
   let h=`<div class="qs" style="--c:${g.c}"><div class="qs-c"><b>${r.score}</b><small>/100</small></div><div class="qs-t"><b>${g.t}</b><small>${r.type==='cosm'?'Nota rápida según los ingredientes':'Nota rápida automática'}</small></div></div>`;
   if(r.type==='cosm'){
@@ -188,11 +191,15 @@ function infoBlock(p){
   if(p.src!=='obf')sc.push(`<div class="score"><b>${(p.additives||[]).length}</b>Aditivos</div>`);
   return `<div class="card"><div class="hero">${imgOf(p)?`<img src="${esc(imgOf(p))}" alt="">`:''}<div><h3>${esc(p.name||'(sin nombre)')}</h3><div class="muted">${esc(p.brand||'')}${p.quantity?' · '+esc(p.quantity):''}</div>
   ${p.code?`<div class="muted" style="font-size:13px;margin-top:4px">Código: ${esc(p.code)}</div>`:''}
-  <div class="muted" style="font-size:12px;margin-top:2px">${p.src==='off'?'Datos: Open Food Facts':p.src==='obf'?'Datos: Open Beauty Facts':'Añadido a mano'}</div></div></div>
+  <div class="muted" style="font-size:12px;margin-top:2px">${p.src==='off'?'Datos: Open Food Facts':p.src==='obf'?'Datos: Open Beauty Facts':'Añadido a mano'}${p.user?' + completados por ti':''}</div></div></div>
+  ${p.user?`<div class="ubadge">✍️ Datos completados por ti${p.user.at?` <small>· ${new Date(p.user.at).toLocaleDateString('es-ES')}</small>`:''}</div>`:''}
   ${quickScoreHTML(p)}
-  ${p.src!=='manual'?`<div class="scores">${sc.join('')}</div>`:''}
+  ${(()=>{const r=SCORE.evaluate(p),miss=COMPLETE.missing(p);if(r.score==null)return '';
+    return miss.length?`<div class="fhint cta2">Falta${miss.length>1?'n':''} ${esc(miss.join(' y '))}: la nota puede no ser exacta.<button type="button" class="btn block js-complete" style="margin-top:8px">📷 Completar con fotos</button></div>`
+      :`<button type="button" class="btn ghost block js-complete" style="margin-top:10px">📷 Completar / corregir datos</button>`})()}
+  ${p.src!=='manual'||p.user?`<div class="scores">${sc.join('')}</div>`:''}
   ${p.nova?`<div class="muted" style="font-size:14px">NOVA ${p.nova}: ${NOVA[p.nova]||''}</div>`:''}</div>
-  ${p.src!=='manual'?`
+  ${p.src!=='manual'||p.user?`
   <details ${p.ingredients?'':''}><summary>🧾 Ingredientes</summary><p class="list-add">${esc(p.ingredients||'No disponible')}</p></details>
   ${p.src==='obf'?'':(()=>{const items=(p.additives||[]).map(a=>ADDITIVES.info(a)).sort((a,b)=>(b.level??-1)-(a.level??-1));
     return `<details class="adds" ${items.length?'open':''}><summary>🧪 Aditivos (${items.length}) ${riskCounts(items)}</summary>${items.length?riskList(items,true)+RISK_NOTE:'<p class="list-add">Ninguno declarado</p>'}</details>`})()}
@@ -230,6 +237,7 @@ function bindForm(p,onSaved){
     o.name=$('#f-name').value.trim();o.brand=$('#f-brand').value.trim();
     if(!o.name){const f=$('#f-name');f.classList.add('invalid');f.scrollIntoView({block:'center',behavior:'smooth'});setTimeout(()=>f.focus({preventScroll:true}),250);toast('Escribe el nombre arriba ✏️');return}
     o.cat=$('#f-cat').value||null;o.rating=rating;o.verdict=verdict;o.photo=photo;o.notes=$('#f-notes').value.trim();const nn=getNutr();o.nutr=nn.nutr;o.smart=nn.smart;
+    if(o.user&&o.user.nutr&&nn.nutr){const un={...o.user.nutr};let ch=false;for(const k of ['fiber','carbs','protein','kcal'])if(nn.nutr[k]!=null&&nn.nutr[k]!==un[k]){un[k]=nn.nutr[k];ch=true}if(ch){const keep={nutr:o.nutr};Object.assign(o,COMPLETE.applyUser(o,{...o.user,nutr:un}));o.nutr={...o.nutr,...keep.nutr,source:o.nutr.source}}}
     o.id=o.id||uid();o.created=o.created||Date.now();o.updated=Date.now();
     await DB.put('prods',o);toast('✓ Guardado');onSaved(o);
   };
@@ -251,6 +259,77 @@ function editCat(c){return new Promise(res=>{
   $('#c-ok').onclick=async()=>{const name=$('#c-name').value.trim();if(!name){toast('Escribe un nombre');return}
     const all=await DB.all('cats');const o={...c,id:c.id||uid(),name,emoji:$('#c-emo').value.trim(),color:col,order:c.order??all.length};await DB.put('cats',o);closeSheet();res(o)};
   setTimeout(()=>$('#c-name').focus(),50);
+})}
+
+/* ---------- Completar con fotos (complete.js + ocr.js) ---------- */
+function bindComplete(p,onDone){document.querySelectorAll('.js-complete').forEach(b=>b.onclick=async()=>{const u=await completeSheet(p);if(u)await onDone(u)})}
+const CX_F=[['kcal','Energía (kcal)'],['fat','Grasas (g)'],['satfat','…saturadas (g)'],['carbs','Hidratos (g)'],['sugars','…azúcares (g)'],['fiber','Fibra (g)'],['protein','Proteínas (g)'],['salt','Sal (g)']];
+function completeSheet(p){return new Promise(res=>{
+  const cosm=p.src==='obf',u0=p.user||{},n0={...(p.nutr||{}),...(u0.nutr||{})},nx=p.nx||{};
+  const ini={kcal:n0.kcal??(nx.energy!=null?Math.round(nx.energy/4.184):null),fat:n0.fat,satfat:n0.satfat??nx.saturated_fat,carbs:n0.carbs,sugars:n0.sugars??nx.sugars,
+    fiber:n0.fiber??nx.fiber,protein:n0.protein??nx.proteins,salt:n0.salt??nx.salt};
+  const fv=v=>v==null||v===''?'':String(Math.round(+v*100)/100).replace('.',',');
+  const bio0=p.bio!=null?!!p.bio:COMPLETE.detectBio(p.name,p.brand,p.labels);
+  const ocrBtns=(id)=>`<div class="row"><label class="btn sec" style="margin:0">📷 Hacer foto<input type="file" id="${id}-cam" accept="image/*" capture="environment" hidden></label><label class="btn ghost" style="margin:0;flex:none;padding:0 14px" title="Elegir foto">🖼️ Galería<input type="file" id="${id}-gal" accept="image/*" hidden></label></div><div id="${id}-st"></div>`;
+  const m=sheet(`<h3>📷 Completar / corregir datos</h3>
+  <p class="muted" style="margin:0 0 6px;font-size:14px">${esc(p.name||'(sin nombre)')}${p.brand?' · '+esc(p.brand):''}. Las fotos se leen en el móvil; revisa los valores antes de guardar.</p>
+  ${cosm?'':`<div class="cxstep"><b class="cxn">1</b><b>Tabla nutricional</b> <small class="muted">(por 100 g)</small></div>${ocrBtns('cx-n')}
+  <label>Valores por</label><select id="cx-base"><option ${n0.base!=='100 ml'?'selected':''}>100 g</option><option ${n0.base==='100 ml'?'selected':''}>100 ml</option></select>
+  <div class="ngrid cxgrid">${CX_F.map(([k,l])=>`<div><label for="cx-${k}">${l}</label><input id="cx-${k}" data-k="${k}" inputmode="decimal" value="${fv(ini[k])}" placeholder="—"></div>`).join('')}</div>
+  <label for="cx-fvl">% fruta, verdura, legumbres o frutos secos <small class="muted">(opcional)</small></label><input id="cx-fvl" inputmode="decimal" value="${fv(u0.nutr&&u0.nutr.fvl)}" placeholder="0 si no lo sabes">`}
+  <div class="cxstep"><b class="cxn">${cosm?1:2}</b><b>Ingredientes</b></div>${ocrBtns('cx-i')}
+  <label for="cx-ing">Lista de ingredientes <small class="muted">(puedes corregirla)</small></label><textarea id="cx-ing" rows="5" placeholder="Ingredientes: …">${esc(p.ingredients||'')}</textarea>
+  <div id="cx-det"></div>
+  ${cosm?'':`<div class="cxstep"><b class="cxn">3</b><b>Otros datos</b></div>
+  <label class="chk" style="margin-top:8px"><input type="checkbox" id="cx-bio" ${bio0?'checked':''}> 🌿 Ecológico / Bio</label>
+  <label for="cx-ns">Nutri-Score impreso en el envase <small class="muted">(opcional)</small></label><select id="cx-ns"><option value="">No lo pone / no lo sé</option>${'abcde'.split('').map(l=>`<option value="${l}" ${u0.nsLetter===l?'selected':''}>${l.toUpperCase()}</option>`).join('')}</select>
+  <div class="muted" style="font-size:12px">Si están los nutrientes, el Nutri-Score se calcula solo con ellos.</div>`}
+  <div id="cx-prev" class="cxprev"></div>
+  <div class="row" style="margin-top:12px"><button type="button" class="btn ghost" id="cx-cancel">Cancelar</button><button type="button" class="btn" id="cx-save">💾 Guardar datos</button></div>`);
+  let touchedN=false,touchedI=false,busy=false;
+  const done=v=>{closeSheet();res(v)};
+  m.onclick=e=>{if(e.target===m&&!busy)done(null)};
+  const draft=()=>{
+    const u={at:Date.now()};
+    if(!cosm){const n={base:$('#cx-base').value};for(const [k] of CX_F)n[k]=pnum($('#cx-'+k).value);n.fvl=pnum($('#cx-fvl').value);
+      u.nutr=touchedN||u0.nutr?n:(u0.nutr||null);u.bio=$('#cx-bio').checked;u.nsLetter=$('#cx-ns').value||''}
+    const t=$('#cx-ing').value.trim();
+    if(t&&(touchedI||u0.ingredients||!String(p.ingredients||'').trim()||t!==String(p.ingredients||'').trim())){const a=COMPLETE.analyzeIngredients(t);Object.assign(u,{ingredients:t,additives:a.additives,allergens:a.allergens,traces:a.traces})}
+    return u};
+  const preview=()=>{
+    const t=$('#cx-ing').value.trim(),a=COMPLETE.analyzeIngredients(t);
+    const ads=a.additives.map(c=>ADDITIVES.info(c));
+    $('#cx-det').innerHTML=t?`<div class="cxdet"><b>🧪 Aditivos detectados (${ads.length})</b>${ads.length?`<div class="cxchips">${ads.map(x=>`<span class="cxchip" style="--c:${x.c}" title="${esc(x.t)}"><i></i>${esc(adCode(x.code))}${x.name?' '+esc(x.name):''}</span>`).join('')}</div>`:'<div class="muted" style="font-size:13px">Ninguno</div>'}
+      <b>⚠️ Alérgenos</b><div style="font-size:14px">${a.allergens.length?esc(a.allergens.join(', ')):'<span class="muted">Ninguno detectado</span>'}${a.traces.length?`<br><span class="muted">Trazas:</span> ${esc(a.traces.join(', '))}`:''}</div></div>`:'';
+    const d=draft(),r=SCORE.evaluate(COMPLETE.applyUser(p,d));let w='';
+    if(d.nutr){const n=d.nutr,ws=NUTR.warnings(n);if(n.satfat!=null&&n.fat!=null&&n.satfat>n.fat+1e-9)ws.push('Las saturadas superan a las grasas');if(n.sugars!=null&&n.carbs!=null&&n.sugars>n.carbs+1e-9)ws.push('Los azúcares superan a los hidratos');if(n.salt!=null&&n.salt>25)ws.push('Más de 25 g de sal: revisa la coma');
+      w=ws.map(x=>`<div class="ev warn">⚠️ ${esc(x)}</div>`).join('')}
+    $('#cx-prev').innerHTML=w+(r.score==null?`<div class="ev unk">Con estos datos aún no sale nota: ${cosm?'faltan los ingredientes':'hacen falta al menos calorías, azúcares, grasa saturada y sal'}.</div>`
+      :`<div class="qs" style="--c:${r.grade.c};margin:12px 0 0"><div class="qs-c" style="width:62px;height:62px"><b style="font-size:26px">${r.score}</b></div><div class="qs-t"><b style="font-size:19px">${r.grade.t}</b><small>Nota con estos datos${r.nsGrade?' · Nutri-Score '+r.nsGrade.toUpperCase():''}</small></div></div>`)};
+  const setSt=(id,h)=>{$('#'+id+'-st').innerHTML=h};
+  const prog=(id,f)=>{setSt(id,`<div class="ocrbox"><img src="${URL.createObjectURL(f)}" alt=""><div style="flex:1"><b id="${id}-msg">Preparando lector…</b><div class="pbar"><i id="${id}-bar"></i></div><small class="muted">Se lee en el móvil. La 1ª vez descarga el lector (unos 5 MB).</small></div></div>`);
+    return (v,msg)=>{const b=$('#'+id+'-bar');if(b)b.style.width=Math.round(v*100)+'%';const t=$('#'+id+'-msg');if(t&&msg)t.textContent=msg}};
+  const scanN=async f=>{if(!f)return;busy=true;const id='cx-n';
+    try{const r=await OCR.read(f,prog(id,f));const L={kcal:'kcal',fat:'grasas',satfat:'saturadas',carbs:'hidratos',sugars:'azúcares',fiber:'fibra',protein:'proteínas',salt:'sal'};
+      document.querySelectorAll('.cxgrid input').forEach(i=>i.classList.remove('ocr','warn'));
+      for(const k in L){const i=$('#cx-'+k);if(r[k]!=null){i.value=fv(r[k]);i.classList.add('ocr')}}(r.uncertain||[]).forEach(k=>{const i=$('#cx-'+k);if(i&&r[k]!=null)i.classList.add('warn')});
+      if(r.base)$('#cx-base').value=r.base;touchedN=true;
+      const miss=Object.keys(L).filter(k=>r[k]==null).map(k=>L[k]);const unc=(r.uncertain||[]).filter(k=>r[k]!=null&&L[k]).map(k=>L[k]);
+      $('#'+id+'-st .ocrbox>div').innerHTML=`<b>${r.found.length?'✓ Tabla leída':'No se ha podido leer la tabla'}</b><small>Comprueba los valores con la foto.</small>${unc.length?`<small class="w">Lectura dudosa: ${unc.join(', ')}</small>`:''}${miss.length?`<small class="w">No encontrado: ${miss.join(', ')} (escríbelo si aparece)</small>`:''}${r.notes.some(n=>/sodio/.test(n))?'<small>Sal calculada desde el sodio (× 2,5)</small>':''}`;
+      preview()}catch(e){setSt(id,`<div class="ev warn">⚠️ ${esc(e.message||'No se pudo leer')}. Puedes escribir los valores a mano.</div>`)}busy=false};
+  const scanI=async f=>{if(!f)return;busy=true;const id='cx-i';
+    try{const r=await OCR.readText(f,prog(id,f));const t=COMPLETE.cleanIngredients(r.text);$('#cx-ing').value=t;touchedI=true;
+      if(!cosm){if(COMPLETE.detectBio(t))$('#cx-bio').checked=true;const l=COMPLETE.detectNutriLetter(r.text);if(l&&!$('#cx-ns').value)$('#cx-ns').value=l}
+      $('#'+id+'-st .ocrbox>div').innerHTML=`<b>${t.length>15?'✓ Ingredientes leídos':'Apenas se ha podido leer texto'}</b><small>Revisa el texto abajo y corrige lo que haga falta.</small>${r.confidence<60?'<small class="w">Lectura poco segura: acerca más el móvil o usa más luz</small>':''}`;
+      preview()}catch(e){setSt(id,`<div class="ev warn">⚠️ ${esc(e.message||'No se pudo leer')}. Puedes escribir los ingredientes a mano.</div>`)}busy=false};
+  for(const [id,fn] of [['cx-n',scanN],['cx-i',scanI]])for(const s of ['cam','gal']){const i=$('#'+id+'-'+s);if(i)i.onchange=e=>{const f=e.target.files[0];e.target.value='';fn(f)}}
+  m.querySelectorAll('.cxgrid input,#cx-fvl,#cx-base').forEach(i=>i.addEventListener('input',()=>{i.classList.remove('ocr','warn');touchedN=true;preview()}));
+  $('#cx-ing').addEventListener('input',()=>{touchedI=true;preview()});
+  if(!cosm){$('#cx-bio').onchange=preview;$('#cx-ns').onchange=preview}
+  $('#cx-cancel').onclick=()=>done(null);
+  $('#cx-save').onclick=()=>{if(busy){toast('Espera a que termine de leer la foto');return}const u=draft();
+    if(!COMPLETE.hasNutr(u.nutr)&&!u.ingredients&&u.bio==null){toast('No hay datos que guardar');return}done(u)};
+  preview();
 })}
 
 /* ---------- Vistas ---------- */
@@ -346,11 +425,31 @@ async function vLookup(code,params){
   view.innerHTML=`<div class="empty"><div class="big">⏳</div>Buscando ${esc(code)} en Open Food Facts…</div>`;
   let p;try{p=await lookup(code)}catch(e){view.innerHTML=`<div class="empty"><div class="big">📡</div>Sin conexión. Conéctate para consultar el producto.</div><a class="btn ghost block" href="#/manual?code=${code}">✍️ Añadirlo a mano</a>`;return}
   if(!p){view.innerHTML=`<div class="empty"><div class="big">🤷</div>El código <b>${esc(code)}</b> no está en Open Food Facts ni en Open Beauty Facts.</div><a class="btn block" href="#/manual?code=${code}">✍️ Añadirlo a mano</a><div style="height:10px"></div><a class="btn ghost block" href="#/scan">📷 Escanear otro</a>`;return}
-  if(existing){view.innerHTML=infoBlock(p)+`<div class="card"><b>Ya lo tienes guardado.</b><div style="height:10px"></div><a class="btn block" href="#/p/${existing.id}">Ver mi ficha</a><div style="height:8px"></div><button class="btn sec block" id="refresh">🔄 Actualizar datos de la base</button></div>`;
-    $('#refresh').onclick=async()=>{const {photo,notes,rating,verdict,cat,id,created,name}=existing;const keep=existing.nutr&&existing.nutr.source!=='off'?existing.nutr:p.nutr||existing.nutr;await DB.put('prods',{...p,photo,notes,rating,verdict,cat,id,created,name:p.name||name,nutr:keep,smart:existing.smart,updated:Date.now()});toast('✓ Datos actualizados');location.hash='#/p/'+id};return}
+  if(existing){const shown=existing.user?COMPLETE.applyUser(p,existing.user):p;
+    view.innerHTML=infoBlock(shown)+`<div class="card"><b>Ya lo tienes guardado.</b><div style="height:10px"></div><a class="btn block" href="#/p/${existing.id}">Ver mi ficha</a><div style="height:8px"></div><button class="btn sec block" id="refresh">🔄 Actualizar datos de la base</button>${existing.user?'<div class="muted" style="font-size:12px;margin-top:6px">Tus datos completados se conservan, salvo que elijas lo contrario.</div>':''}</div>`;
+    bindComplete(existing,async u=>{await DB.put('prods',{...COMPLETE.applyUser(existing,u),updated:Date.now()});toast('✓ Datos completados');location.hash='#/p/'+existing.id});
+    $('#refresh').onclick=async()=>{const {photo,notes,rating,verdict,cat,id,created,name}=existing;
+      const keepUser=existing.user?confirm('Tienes datos completados por ti con fotos.\n\nAceptar = conservarlos encima de los de la base\nCancelar = borrarlos y usar solo los de la base'):false;
+      const keep=existing.nutr&&existing.nutr.source!=='off'&&(keepUser||existing.nutr.source!=='usuario')?existing.nutr:p.nutr||(existing.nutr&&existing.nutr.source==='usuario'?null:existing.nutr);
+      let rec={...p,photo,notes,rating,verdict,cat,id,created,name:p.name||name,nutr:keep,smart:existing.smart,updated:Date.now()};
+      if(keepUser)rec=COMPLETE.applyUser(rec,existing.user);else delete rec.user;
+      await DB.put('prods',rec);toast('✓ Datos actualizados');location.hash='#/p/'+id};return}
   p.cat=params.get('cat')&&params.get('cat')!=='none'?params.get('cat'):(localStorage.getItem('md-lastcat')||null);
+  await renderNew(p);
+}
+/* Producto consultado y aún sin guardar: se puede completar con fotos antes de guardarlo */
+async function renderNew(p){
   view.innerHTML=infoBlock(p)+await saveForm(p,true)+`<a class="btn ghost block" href="#/scan">📷 Escanear otro</a>`;
   bindForm(p,o=>{if(o.cat)localStorage.setItem('md-lastcat',o.cat);location.hash='#/p/'+o.id});
+  bindComplete(p,async u=>{
+    // conservar lo ya escrito en el formulario
+    const v=id=>{const e=$(id);return e?e.value:undefined};
+    const st={name:v('#f-name'),brand:v('#f-brand'),cat:v('#f-cat'),notes:v('#f-notes'),rating:document.querySelectorAll('#f-stars .on').length,verdict:(document.querySelector('#f-verd .on')||{}).dataset?.v||''};
+    Object.assign(p,COMPLETE.applyUser(p,u));
+    if(st.name!=null){p.name=st.name.trim()||p.name;p.brand=st.brand.trim();p.cat=st.cat||null;p.notes=st.notes;p.rating=st.rating;p.verdict=st.verdict}
+    await renderNew(p);toast('✓ Datos completados: ahora guárdalo');
+    const q=document.querySelector('.qs');if(q)q.scrollIntoView({block:'center'});
+  });
 }
 
 async function vProduct(id){
@@ -359,6 +458,7 @@ async function vProduct(id){
   view.innerHTML=infoBlock(p)+(p.notes?`<div class="card"><b>📝 Mis notas</b><p style="white-space:pre-wrap;margin:6px 0 0">${esc(p.notes)}</p></div>`:'')+await saveForm(p,false)+
   `<div class="row">${p.code&&p.src!=='manual'?`<a class="btn ghost" href="https://world.${p.src==='obf'?'openbeautyfacts':'openfoodfacts'}.org/product/${esc(p.code)}" target="_blank" rel="noopener">🌐 Ver en ${p.src==='obf'?'OBF':'OFF'}</a>`:''}<button class="btn danger" id="pdel">🗑️ Borrar</button></div>`;
   bindForm(p,()=>vProduct(id));
+  bindComplete(p,async u=>{const cur=await DB.get('prods',id)||p;await DB.put('prods',{...COMPLETE.applyUser(cur,u),updated:Date.now()});toast('✓ Datos completados');await vProduct(id);const q=document.querySelector('.qs');if(q)q.scrollIntoView({block:'center'})});
   $('#pdel').onclick=async()=>{if(confirm('¿Borrar este producto de tu despensa?')){await DB.del('prods',id);toast('Borrado');history.back()}};
 }
 

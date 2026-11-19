@@ -94,7 +94,7 @@ const OCR=(()=>{
       else if(!r)parsed.uncertain=(parsed.uncertain||[]).concat(key);
     }
     // valores imposibles por 100 g: se dejan vacíos para que el usuario los escriba (no se adivinan decimales)
-    for(const k of ['fiber','carbs','protein','fat'])if(parsed[k]!=null&&parsed[k]>100){parsed.notes.push(`${k}: "${parsed[k]}" no es posible por 100 g, escríbelo a mano`);parsed[k]=null}
+    for(const k of ['fiber','carbs','protein','fat','satfat','sugars','salt','sodium'])if(parsed[k]!=null&&parsed[k]>100){parsed.notes.push(`${k}: "${parsed[k]}" no es posible por 100 g, escríbelo a mano`);parsed[k]=null}
     if(parsed.kcal!=null&&parsed.kcal>900){parsed.notes.push('kcal ilegibles');parsed.kcal=null}
     return parsed;
   }
@@ -119,5 +119,20 @@ const OCR=(()=>{
     parsed.rotation=best.rot;parsed.confidence=Math.round(best.data.confidence||0);parsed.text=best.data.text;
     return parsed;
   }
-  return {read,prepare,loadImage};
+  /* Texto libre (lista de ingredientes): prueba contraste normal y binarizado (y girada si sale poco texto) y se queda
+     con la lectura con más palabras reconocibles. */
+  const wordsScore=d=>{const ws=(d.words||[]).filter(w=>w.confidence>55&&/[a-záéíóúñü]{3,}/i.test(w.text));return ws.length+(/ingredientes|ingredients/i.test(d.text||'')?5:0)};
+  async function readText(file,onProgress){
+    progressCb=onProgress||(()=>{});
+    const img=await loadImage(file),w=await worker();
+    let best=null;const variants=[[0,'gray'],[0,'bin'],[90,'gray'],[270,'gray'],[180,'gray']];
+    for(let vi=0;vi<variants.length;vi++){
+      const [rot,mode]=variants[vi];if(vi)progressCb(0.3+0.6*vi/variants.length,rot?'Probando la foto girada…':'Probando otro contraste…');
+      const cv=prepare(img,rot,mode);const {data}=await w.recognize(mode==='gray'?cv.gray:cv);
+      const q=wordsScore(data);if(!best||q>best.q)best={q,data,rot};
+      if(vi>=1&&best.q>=12&&best.rot===0)break;
+    }
+    return {text:best.data.text||'',confidence:Math.round(best.data.confidence||0),rotation:best.rot};
+  }
+  return {read,readText,prepare,loadImage};
 })();

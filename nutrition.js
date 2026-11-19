@@ -59,8 +59,13 @@ const LABELS={
   protein:/(protein|proteina|eiweiss)/,
   fat:/(^|[^a-z])(grasa|grasas|fat|fats|lipidos|fett)([^a-z]|$)/,
   energy:/(energ|kcal|kj\b|calorias)/,
+  satfat:/(saturad|saturat|gesatt)/,
+  sugars:/(azucar|sugar|zucker)/,
+  salt:/(^|[^a-z])(sal|salt|salz|sel)([^a-z]|$)/,
+  sodium:/(sodio|sodium|natrium)/,
 };
-const EXCL={carbs:/(azucar|sugar|zucker|polialcohol|almidon|starch)/,fat:/(saturad|saturat|insatur|unsatur|trans|gesatt)/,fiber:/$^/,protein:/$^/,energy:/$^/};
+const EXCL={carbs:/(azucar|sugar|zucker|polialcohol|almidon|starch)/,fat:/(saturad|saturat|insatur|unsatur|trans|gesatt)/,fiber:/$^/,protein:/$^/,energy:/$^/,
+  satfat:/(insatur|unsatur|monoinsat|poliinsat|ungesatt)/,sugars:/(polialcohol|edulcor|sin azucar|anadido)/,salt:/(sodio|sodium|natrium)/,sodium:/$^/};
 function cleanTok(t){
   // corrige confusiones típicas del OCR solo dentro de tokens que ya parecen números
   let s=String(t).trim().replace(/[‚]/g,',').replace(/[‘’'`´]/g,'').replace(/^[T|\[!¡«»](?=\d)/,'');
@@ -138,11 +143,11 @@ function pickColumn(nums,hdr){
 function parseNutritionWords(words){
   const {rows,mh}=buildRows(words);
   const hdr=findHeader(rows);
-  const res={fiber:null,carbs:null,protein:null,kcal:null,fat:null,base:hdr.base||null,found:[],notes:[],boxes:{}};
+  const res={fiber:null,carbs:null,protein:null,kcal:null,fat:null,satfat:null,sugars:null,salt:null,sodium:null,base:hdr.base||null,found:[],notes:[],boxes:{}};
   const labelEnd=(r,re)=>{for(let i=0;i<r.w.length;i++){if(re.test(norm(r.w[i].t))){let j=i+1;while(j<r.w.length&&!/\d/.test(r.w[j].t))j++;return j}}
     // etiqueta partida en varios tokens: cuenta palabras sin dígitos al inicio
     let j=0;while(j<r.w.length&&!/\d/.test(r.w[j].t))j++;return j};
-  for(const key of ['fiber','carbs','protein','fat']){
+  for(const key of ['fiber','carbs','protein','fat','satfat','sugars','salt','sodium']){
     for(let ri=0;ri<rows.length;ri++){
       const r=rows[ri];if(!LABELS[key].test(r.text)||EXCL[key].test(r.text))continue;
       if(key==='carbs'&&/(de los cuales|de las cuales|of which)/.test(r.text)&&!/hidratos|carbohidrat|carbohydrat/.test(r.text))continue;
@@ -166,6 +171,8 @@ function parseNutritionWords(words){
     const kj=nums.filter(n=>n.unit==='kj');
     if(kj.length){res.kcal=Math.round(pickColumn(kj,hdr).v/4.184);res.found.push('kcal');res.notes.push('kcal calculadas a partir de kJ');break}
   }
+  // sal: si solo aparece el sodio, sal = sodio × 2,5 (Reglamento 1169/2011)
+  if(res.salt==null&&res.sodium!=null){res.salt=Math.round(res.sodium*2.5*100)/100;res.found.push('salt');res.notes.push('sal calculada a partir del sodio (× 2,5)')}
   if(!res.base)res.base=rows.some(r=>/100\s*ml/.test(r.text))?'100 ml':'100 g';
   if(!hdr.col100)res.notes.push('No se encontró la cabecera "por 100 g": se tomó la primera columna');
   res.headerFound=!!hdr.col100;
