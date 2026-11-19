@@ -52,20 +52,39 @@ function warnings(n){
 
 /* ---------- Lector de tabla nutricional ----------
    words: [{text, bbox:{x0,y0,x1,y1}}] (salida de Tesseract). Devuelve {fiber,carbs,protein,kcal,fat,base,found,notes} */
-const norm=s=>String(s).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
-const LABELS={
-  fiber:/(fibra|fibre|fiber|ballaststoff)/,
-  carbs:/(hidratos|carbohidrat|carbohydrat|glucid|kohlenhydrat)/,
-  protein:/(protein|proteina|eiweiss)/,
-  fat:/(^|[^a-z])(grasa|grasas|fat|fats|lipidos|fett)([^a-z]|$)/,
-  energy:/(energ|kcal|kj\b|calorias)/,
-  satfat:/(saturad|saturat|gesatt)/,
-  sugars:/(azucar|sugar|zucker)/,
-  salt:/(^|[^a-z])(sal|salt|salz|sel)([^a-z]|$)/,
-  sodium:/(sodio|sodium|natrium)/,
+const norm=s=>String(s).toLowerCase().replace(/ß/g,'ss').normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+/* Palabras clave por nutriente en es, en, de, fr, it, pt, nl (texto ya normalizado: minúsculas, sin tildes, ß→ss) */
+const KW={
+  energy:{re:/(energ|brennwert|kcal|kj\b|calori|valor energetic|valeur energetique|energiewaarde)/,stems:['energie','energia','energy','brennwert','energetico','energetique','energiewaarde','calorias']},
+  fat:{re:/(^|[^a-z])(grasa|grasas|fett|fat|fats|lipidos|lipides|grassi|gordura|gorduras|lipidi|vet|vetten|matieres grasses|grasses|total fat)([^a-z]|$)/,stems:['grasas','matieres','grassi','gorduras','lipidos','lipides','vetten']},
+  satfat:{re:/(saturad|saturat|satur|gesatt|verzadig)/,stems:['saturadas','saturados','saturated','gesattigte','satures','saturi','saturati','verzadigde','fettsauren']},
+  carbs:{re:/(hidratos|carbohidrat|carbohydrat|kohlenhydrat|glucid|carboidrat|koolhydrat|hidrato)/,stems:['hidratos','carbohidratos','carbohydrate','kohlenhydrate','glucides','carboidrati','koolhydraten']},
+  sugars:{re:/(azucar|sugar|zucker|sucre|zuccher|acucar|suiker)/,stems:['azucares','sugars','zucker','sucres','zuccheri','acucares','suikers']},
+  fiber:{re:/(fibra|fibre|fiber|ballaststoff|vezel|fibras)/,stems:['fibra','fibre','ballaststoffe','vezels','alimentaria','alimentaires']},
+  protein:{re:/(protein|proteina|eiweiss|eiweis|proteine|proteines|eiwit)/,stems:['proteinas','protein','proteine','proteines','eiweiss','eiwitten','proteinen']},
+  salt:{re:/(^|[^a-z])(sal|salt|salz|sel|sale|zout)([^a-z]|$)/,stems:[]},
+  sodium:{re:/(sodio|sodium|natrium)/,stems:['sodium','natrium']},
 };
-const EXCL={carbs:/(azucar|sugar|zucker|polialcohol|almidon|starch)/,fat:/(saturad|saturat|insatur|unsatur|trans|gesatt)/,fiber:/$^/,protein:/$^/,energy:/$^/,
-  satfat:/(insatur|unsatur|monoinsat|poliinsat|ungesatt)/,sugars:/(polialcohol|edulcor|sin azucar|anadido)/,salt:/(sodio|sodium|natrium)/,sodium:/$^/};
+const LABELS=Object.fromEntries(Object.entries(KW).map(([k,v])=>[k,v.re]));
+/* Distancia de edición limitada (para palabras mal leídas por el OCR: "Kohientydrate", "Fetrsauren") */
+function lev(a,b,max){if(Math.abs(a.length-b.length)>max)return max+1;let prev=Array.from({length:b.length+1},(_,i)=>i);
+  for(let i=1;i<=a.length;i++){const cur=[i];let best=i;for(let j=1;j<=b.length;j++){cur[j]=Math.min(prev[j]+1,cur[j-1]+1,prev[j-1]+(a[i-1]===b[j-1]?0:1));if(cur[j]<best)best=cur[j]}if(best>max)return max+1;prev=cur}return prev[b.length]}
+function fuzzyHas(text,key){
+  const stems=KW[key].stems;if(!stems.length)return false;
+  for(const tok of text.split(/[^a-z]+/)){if(tok.length<5)continue;
+    for(const st of stems){const max=st.length>=9?2:1;
+      // compara la palabra entera y su comienzo (la etiqueta puede venir pegada: "brennwervenergie")
+      if(lev(tok,st,max)<=max||(tok.length>st.length&&lev(tok.slice(0,st.length),st,max)<=max))return true}}
+  return false}
+/* Nutrientes que nombra una fila. "Saturadas" quita "grasas" y "azúcares" quita "hidratos" (son filas "de las cuales"). */
+function rowKeys(text){
+  const ks=new Set();for(const k in KW)if(KW[k].re.test(text)||fuzzyHas(text,k))ks.add(k);
+  if(ks.has('satfat'))ks.delete('fat');
+  if(ks.has('sugars')){ks.delete('carbs');}
+  if(/(polialcohol|polyol|edulcor|almidon|starch|starke|amido|zetmeel|amidon)/.test(text)){ks.delete('carbs');ks.delete('sugars')}
+  if(ks.has('salt')&&ks.has('sodium'))ks.delete('sodium');
+  if(/(insatur|unsatur|monoinsat|poliinsat|ungesatt|onverzadig|mono-insat|polyinsat)/.test(text))ks.delete('satfat');
+  return ks}
 function cleanTok(t){
   // corrige confusiones típicas del OCR solo dentro de tokens que ya parecen números
   let s=String(t).trim().replace(/[‚]/g,',').replace(/[‘’'`´]/g,'').replace(/^[T|\[!¡«»](?=\d)/,'');
@@ -90,7 +109,7 @@ function buildRows(words){
     for(const r of rows.slice(-4)){const d=Math.abs(r.yc-w.yc);if(d<Math.max(0.55*mh,0.45*Math.min(w.h,r.h)*1.2)&&d<bd){bd=d;best=r}}
     if(best){best.w.push(w);best.yc=(best.yc*(best.w.length-1)+w.yc)/best.w.length;best.h=Math.max(best.h,w.h)}else rows.push({w:[w],yc:w.yc,h:w.h});
   }
-  rows.forEach(r=>{r.w.sort((a,b)=>a.x0-b.x0);r.text=norm(r.w.map(x=>x.t).join(' '))});
+  rows.forEach(r=>{r.w.sort((a,b)=>a.x0-b.x0);r.text=norm(r.w.map(x=>x.t).join(' '));r.keys=rowKeys(r.text)});
   return {rows,mh};
 }
 /* Extrae números de una fila (a partir de un índice), uniendo "2 ,5"/"2, 5" y descartando porcentajes (%IR) */
@@ -122,11 +141,11 @@ function findHeader(rows){
     const t=r.text;
     for(let i=0;i<r.w.length;i++){
       const a=norm(r.w[i].t),b=r.w[i+1]?norm(r.w[i+1].t):'';
-      const m=(a+' '+b).replace(/\b(mi|m1|mt)\b/,'ml').match(/^(?:por|per|pro|\/)?\s*100\s*(g|gr|ml)\b/)||a.replace(/(mi|m1)$/,'ml').match(/100(g|gr|ml)/);
+      const m=(a+' '+b).replace(/\b(mi|m1|mt)\b/,'ml').match(/^(?:por|per|pro|je|pour|\/)?\s*100\s*(g|gr|ml)\b/)||a.replace(/(mi|m1)$/,'ml').match(/100(g|gr|ml)/);
       if(m&&!col100){const end=/^(g|gr|ml|mi|m1)/.test(b)&&!/100(g|gr|ml)/.test(a)?r.w[i+1]:r.w[i];col100={xc:(r.w[i].x0+end.x1)/2,y:r.yc};base=/ml/.test(m[1])?'100 ml':'100 g'}
     }
-    if(!portion&&/(porcion|racion|serving|envase|unidad|portion|por toma|per pack|por vaso|por barrita|por galleta)/.test(t)){
-      const i=r.w.findIndex(w=>/(porcion|racion|serving|envase|unidad|portion|toma|vaso|barrita|galleta)/.test(norm(w.t)));
+    if(!portion&&/(porcion|racion|serving|envase|unidad|portion|por toma|per pack|por vaso|por barrita|por galleta|rebanada|scheibe|stuck|tranche|porzione|fetta|dose|porcao|portie|snee)/.test(t)){
+      const i=r.w.findIndex(w=>/(porcion|racion|serving|envase|unidad|portion|toma|vaso|barrita|galleta|rebanada|scheibe|stuck|tranche|porzione|fetta|dose|porcao|portie|snee)/.test(norm(w.t)));
       if(i>=0)portion={xc:r.w[i].xc,y:r.yc};
     }
   }
@@ -143,41 +162,60 @@ function pickColumn(nums,hdr){
 function parseNutritionWords(words){
   const {rows,mh}=buildRows(words);
   const hdr=findHeader(rows);
+  // sin cabecera "100 g" pero con dos columnas de cifras: la columna por 100 g es la de la izquierda (posición mediana)
+  if(!hdr.col100){
+    const lefts=[],multi=[];
+    for(const r of rows){if(!r.keys.size)continue;const ns=numbersIn(r,0).filter(n=>n.unit!=='kj');if(!ns.length)continue;lefts.push(ns[0].xc);if(ns.length>=2&&ns[1].xc-ns[0].xc>mh*3)multi.push(ns[1].xc)}
+    if(multi.length>=2&&lefts.length>=3){lefts.sort((a,b)=>a-b);multi.sort((a,b)=>a-b);
+      hdr.col100={xc:lefts[Math.floor(lefts.length/2)],virtual:true};hdr.portion=hdr.portion||{xc:multi[Math.floor(multi.length/2)],virtual:true}}
+  }
   const res={fiber:null,carbs:null,protein:null,kcal:null,fat:null,satfat:null,sugars:null,salt:null,sodium:null,base:hdr.base||null,found:[],notes:[],boxes:{}};
   const labelEnd=(r,re)=>{for(let i=0;i<r.w.length;i++){if(re.test(norm(r.w[i].t))){let j=i+1;while(j<r.w.length&&!/\d/.test(r.w[j].t))j++;return j}}
     // etiqueta partida en varios tokens: cuenta palabras sin dígitos al inicio
     let j=0;while(j<r.w.length&&!/\d/.test(r.w[j].t))j++;return j};
   for(const key of ['fiber','carbs','protein','fat','satfat','sugars','salt','sodium']){
     for(let ri=0;ri<rows.length;ri++){
-      const r=rows[ri];if(!LABELS[key].test(r.text)||EXCL[key].test(r.text))continue;
-      if(key==='carbs'&&/(de los cuales|de las cuales|of which)/.test(r.text)&&!/hidratos|carbohidrat|carbohydrat/.test(r.text))continue;
+      const r=rows[ri];if(!r.keys.has(key))continue;
       let nums=numbersIn(r,labelEnd(r,LABELS[key])).filter(n=>!/kcal|kj/.test(n.unit));
       // etiqueta en dos líneas ("Hidratos de / carbono"): mirar la fila siguiente si esta no tiene números
-      if(!nums.length&&rows[ri+1]&&rows[ri+1].yc-r.yc<mh*2.2&&!Object.values(LABELS).some(re=>re.test(rows[ri+1].text)))nums=numbersIn(rows[ri+1],0).filter(n=>!/kcal|kj/.test(n.unit));
+      if(!nums.length&&rows[ri+1]&&rows[ri+1].yc-r.yc<mh*2.2&&!rows[ri+1].keys.size)nums=numbersIn(rows[ri+1],0).filter(n=>!/kcal|kj/.test(n.unit));
       const n=pickColumn(nums,hdr);if(n){res[key]=n.v;res.boxes[key]=n;res.found.push(key);if(n.lt)res.notes.push(`${key}: "<${n.raw}" en la etiqueta`);break}
     }
   }
   // Energía: buscar kcal en la columna por 100 (fila de energía y la siguiente)
   for(let ri=0;ri<rows.length&&res.kcal==null;ri++){
-    const r=rows[ri];if(!/(energ|valor energetico|calorias|kcal|kj)/.test(r.text))continue;
+    const r=rows[ri];if(!r.keys.has('energy')&&!/(kcal|kj)/.test(r.text))continue;
     let nums=numbersIn(r,labelEnd(r,LABELS.energy));
-    if(rows[ri+1]&&rows[ri+1].yc-r.yc<mh*2.2&&!/(grasa|fat|hidratos|protein|fibra)/.test(rows[ri+1].text))nums=nums.concat(numbersIn(rows[ri+1],0).map(n=>({...n,next:true})));
+    if(rows[ri+1]&&rows[ri+1].yc-r.yc<mh*2.2&&!['fat','satfat','carbs','protein','fiber','salt'].some(k=>rows[ri+1].keys.has(k)))nums=nums.concat(numbersIn(rows[ri+1],0).map(n=>({...n,next:true})));
     let kc=nums.filter(n=>n.unit==='kcal');
     if(!kc.length&&/kj\s*\/?\s*kcal|kj.*kcal/.test(r.text)){ // "Valor energético kJ/kcal 1500/360"
       const nn=nums.filter(n=>!n.unit);for(let i=0;i+1<nn.length;i++){if(nn[i].v>0&&Math.abs(nn[i].v/nn[i+1].v-4.184)<0.45){kc.push({...nn[i+1]});}}
     }
     if(!kc.length){const nn=nums.filter(n=>n.unit!=='kj');for(const a of nums)for(const b of nn)if(a!==b&&b.v>0&&Math.abs(a.v/b.v-4.184)<0.45)kc.push(b)}
-    if(kc.length){const n=pickColumn(kc,hdr);res.kcal=n.v;if(n.parts===1)res.boxes.kcal=n;res.found.push('kcal');break}
-    const kj=nums.filter(n=>n.unit==='kj');
-    if(kj.length){res.kcal=Math.round(pickColumn(kj,hdr).v/4.184);res.found.push('kcal');res.notes.push('kcal calculadas a partir de kJ');break}
+    if(kc.length){const n=pickColumn(kc,hdr);if(n){res.kcal=n.v;if(n.parts===1)res.boxes.kcal=n;res.found.push('kcal');break}}
+    const kj=nums.filter(n=>n.unit==='kj');const nj=kj.length?pickColumn(kj,hdr):null;
+    if(nj){res.kcal=Math.round(nj.v/4.184);res.found.push('kcal');res.notes.push('kcal calculadas a partir de kJ');break}
+  }
+  // Plan B: fila con el nombre del nutriente pero sin número (etiquetas en varias líneas o idiomas, o el OCR separa la
+  // columna de nombres de la de valores): tomar la fila con números más cercana en vertical que no sea de otro nutriente
+  const used=new Set(Object.values(res.boxes).map(n=>n.x0+':'+n.y0));
+  for(const key of ['fiber','carbs','protein','fat','satfat','sugars','salt','sodium']){
+    if(res[key]!=null)continue;
+    const lr=rows.filter(r=>r.keys.has(key));
+    for(const r of lr){
+      const cand=rows.filter(o=>o!==r&&Math.abs(o.yc-r.yc)<=1.7*mh&&![...o.keys].some(k=>k!==key&&k!=='energy')).sort((a,b)=>Math.abs(a.yc-r.yc)-Math.abs(b.yc-r.yc));
+      let got=null;
+      for(const o of cand){const nums=numbersIn(o,0).filter(n=>!/kcal|kj/.test(n.unit)&&!used.has(n.x0+':'+n.y0)&&n.x0>=r.w[0].x0);const n=pickColumn(nums,hdr);if(n){got=n;break}}
+      if(got){res[key]=got.v;res.boxes[key]=got;used.add(got.x0+':'+got.y0);res.found.push(key);res.notes.push(key+': valor tomado de la línea de al lado');break}
+    }
   }
   // sal: si solo aparece el sodio, sal = sodio × 2,5 (Reglamento 1169/2011)
   if(res.salt==null&&res.sodium!=null){res.salt=Math.round(res.sodium*2.5*100)/100;res.found.push('salt');res.notes.push('sal calculada a partir del sodio (× 2,5)')}
   if(!res.base)res.base=rows.some(r=>/100\s*ml/.test(r.text))?'100 ml':'100 g';
-  if(!hdr.col100)res.notes.push('No se encontró la cabecera "por 100 g": se tomó la primera columna');
-  res.headerFound=!!hdr.col100;
+  if(!hdr.col100||hdr.col100.virtual)res.notes.push('No se encontró la cabecera "por 100 g": se tomó la primera columna');
+  res.headerFound=!!hdr.col100&&!hdr.col100.virtual;
   return res;
 }
-const api={skewOf,fiberRule,fiberRatio,fiberClaim,proteinClaim,proteinShare,evaluate,sections,warnings,parseNutritionWords,buildRows};
+const api={rowKeys,norm,KW,skewOf,fiberRule,fiberRatio,fiberClaim,proteinClaim,proteinShare,evaluate,sections,warnings,parseNutritionWords,buildRows};
 if(typeof module!=='undefined')module.exports=api;else root.NUTR=api;
 })(this);

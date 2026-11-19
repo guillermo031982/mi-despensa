@@ -156,3 +156,8 @@ details.add p{margin:6px 0 2px 20px;font-size:14px;color:#374151}
 .cxchips{display:flex;flex-wrap:wrap;gap:6px}
 .cxchip{display:inline-flex;align-items:center;gap:5px;padding:4px 10px;border-radius:999px;font-size:13px;background:color-mix(in srgb,var(--c) 14%,#fff);border:1px solid color-mix(in srgb,var(--c) 40%,#fff)}
 .cxchip i{width:9px;height:9px;border-radius:50%;background:var(--c)}
+/* Lector de tablas: herramientas y recorte (v1.0.8) */
+.cxtools{display:flex;gap:6px;margin-top:8px}.cxtools .btn{flex:1;min-height:42px;font-size:14px;padding:0 6px}
+.rawtxt{margin-top:8px}.rawtxt pre{white-space:pre-wrap;font-size:12px;background:#f3f4f6;padding:8px;border-radius:8px;max-height:220px;overflow:auto}
+.cropstage{position:relative;line-height:0}.cropstage canvas{width:100%;height:auto;border-radius:10px;touch-action:none}
+.cropstage i{position:absolute;border:3px solid #16a34a;background:#16a34a22;border-radius:4px;pointer-events:none}

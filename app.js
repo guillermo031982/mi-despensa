@@ -1,5 +1,5 @@
 /* Alimentos Sanos — complemento personal a Yuka. Vanilla JS, datos en IndexedDB (db.js). */
-const APP_VERSION='1.0.7';
+const APP_VERSION='1.0.8';
 const $=(s,r=document)=>r.querySelector(s);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,8);
@@ -123,7 +123,8 @@ function bindNutr(p){
       source='etiqueta';$('#n-src').textContent='Fuente: '+SRC.etiqueta;
       const L={fiber:'fibra',carbs:'hidratos',protein:'proteínas',kcal:'kcal'};
       const miss=Object.keys(L).filter(k=>r[k]==null).map(k=>L[k]);const unc=(r.uncertain||[]).filter(k=>r[k]!=null).map(k=>L[k]);
-      box.querySelector('.ocrbox>div').innerHTML=`<b>${r.found.length?'✓ Etiqueta leída':'No se ha podido leer la tabla'}</b><small>Comprueba los valores con la foto antes de guardar${r.base?' · columna '+esc(r.base):''}.</small>
+      box.insertAdjacentHTML('beforeend',r.text?`<details class="rawtxt"><summary>📄 Ver el texto leído</summary><pre>${esc(r.text.trim())}</pre></details>`:'');
+      box.querySelector('.ocrbox>div').innerHTML=`<b>${r.found.length>=2?'✓ Etiqueta leída':'⚠️ Apenas he podido leer la tabla: haz la foto más cerca, solo de la tabla, o escribe los valores'}</b><small>Comprueba los valores con la foto antes de guardar${r.base?' · columna '+esc(r.base):''}.</small>
         ${unc.length?`<small class="w">Lectura dudosa: ${unc.join(', ')}</small>`:''}${miss.length?`<small class="w">No encontrado: ${miss.join(', ')} (escríbelo si aparece)</small>`:''}${r.notes.some(n=>/kJ/.test(n))?'<small>kcal calculadas desde kJ</small>':''}${!r.headerFound&&r.found.length?'<small class="w">No vi la cabecera "por 100 g": confirma que es esa columna</small>':''}`;
       refresh();
     }catch(e){box.innerHTML=`<div class="ev warn">⚠️ ${esc(e.message||'No se pudo leer')}. Puedes escribir los valores a mano.</div>`}};
@@ -309,14 +310,40 @@ function completeSheet(p){return new Promise(res=>{
   const setSt=(id,h)=>{$('#'+id+'-st').innerHTML=h};
   const prog=(id,f)=>{setSt(id,`<div class="ocrbox"><img src="${URL.createObjectURL(f)}" alt=""><div style="flex:1"><b id="${id}-msg">Preparando lector…</b><div class="pbar"><i id="${id}-bar"></i></div><small class="muted">Se lee en el móvil. La 1ª vez descarga el lector (unos 5 MB).</small></div></div>`);
     return (v,msg)=>{const b=$('#'+id+'-bar');if(b)b.style.width=Math.round(v*100)+'%';const t=$('#'+id+'-msg');if(t&&msg)t.textContent=msg}};
-  const scanN=async f=>{if(!f)return;busy=true;const id='cx-n';
-    try{const r=await OCR.read(f,prog(id,f));const L={kcal:'kcal',fat:'grasas',satfat:'saturadas',carbs:'hidratos',sugars:'azúcares',fiber:'fibra',protein:'proteínas',salt:'sal'};
+  /* Tabla nutricional: nunca deja sin salida. Muestra lo leído (aunque sea poco), el texto en bruto y deja recortar, girar o reintentar. */
+  let nFile=null,nRot=0,nCrop=null;
+  const L8={kcal:'kcal',fat:'grasas',satfat:'saturadas',carbs:'hidratos',sugars:'azúcares',fiber:'fibra',protein:'proteínas',salt:'sal'};
+  const tools=`<div class="cxtools"><button type="button" class="btn ghost" data-t="crop">✂️ Recortar tabla</button><button type="button" class="btn ghost" data-t="rot">↻ Girar 90°</button><button type="button" class="btn ghost" data-t="retry">🔁 Reintentar</button></div><div id="cx-crop"></div>`;
+  const bindTools=()=>{$('#cx-n-st').querySelectorAll('[data-t]').forEach(b=>b.onclick=()=>{if(busy)return;const t=b.dataset.t;
+    if(t==='rot'){nRot=(nRot+90)%360;nCrop=null;scanN(nFile)}else if(t==='retry'){scanN(nFile)}else cropUI()})};
+  const cropUI=async()=>{const box=$('#cx-crop');if(!box||!nFile)return;
+    box.innerHTML=`<div class="cropwrap"><p class="muted" style="margin:6px 0;font-size:14px">Arrastra el dedo para marcar <b>solo la tabla</b> (nombres y valores).</p><div class="cropstage"><canvas id="cx-cv"></canvas><i id="cx-sel" hidden></i></div>
+      <div class="row" style="margin-top:8px"><button type="button" class="btn ghost" id="cx-cc">Cancelar</button><button type="button" class="btn" id="cx-co" disabled>✓ Leer esta zona</button></div></div>`;
+    const cv=await OCR.preview(nFile,nRot,1000),dst=$('#cx-cv');dst.width=cv.width;dst.height=cv.height;dst.getContext('2d').drawImage(cv,0,0);
+    const sel=$('#cx-sel');let a=null,rect=null;
+    const pt=e=>{const r=dst.getBoundingClientRect();return {x:Math.max(0,Math.min(1,(e.clientX-r.left)/r.width)),y:Math.max(0,Math.min(1,(e.clientY-r.top)/r.height))}};
+    const draw=()=>{if(!rect)return;sel.hidden=false;Object.assign(sel.style,{left:rect.x*100+'%',top:rect.y*100+'%',width:rect.w*100+'%',height:rect.h*100+'%'})};
+    dst.style.touchAction='none';
+    dst.onpointerdown=e=>{a=pt(e);dst.setPointerCapture(e.pointerId)};
+    dst.onpointermove=e=>{if(!a)return;const b=pt(e);rect={x:Math.min(a.x,b.x),y:Math.min(a.y,b.y),w:Math.abs(a.x-b.x),h:Math.abs(a.y-b.y)};draw()};
+    dst.onpointerup=()=>{a=null;$('#cx-co').disabled=!(rect&&rect.w>0.05&&rect.h>0.05)};
+    $('#cx-cc').onclick=()=>{box.innerHTML=''};
+    $('#cx-co').onclick=()=>{nCrop=rect;box.innerHTML='';scanN(nFile)};
+    box.scrollIntoView({block:'center'})};
+  const scanN=async f=>{if(!f)return;if(f!==nFile){nFile=f;nRot=0;nCrop=null}busy=true;const id='cx-n';
+    const stat=(head,body,r)=>{setSt(id,`<div class="ocrbox"><img src="${URL.createObjectURL(f)}" alt=""${nRot?` style="transform:rotate(${nRot}deg)"`:''}><div style="flex:1">${head}${body}</div></div>${tools}
+      ${r&&r.text?`<details class="rawtxt"><summary>📄 Ver el texto leído</summary><pre>${esc(r.text.trim())}</pre></details>`:''}`);bindTools()};
+    try{const r=await OCR.read(f,prog(id,f),{rot:nRot,crop:nCrop});
       document.querySelectorAll('.cxgrid input').forEach(i=>i.classList.remove('ocr','warn'));
-      for(const k in L){const i=$('#cx-'+k);if(r[k]!=null){i.value=fv(r[k]);i.classList.add('ocr')}}(r.uncertain||[]).forEach(k=>{const i=$('#cx-'+k);if(i&&r[k]!=null)i.classList.add('warn')});
-      if(r.base)$('#cx-base').value=r.base;touchedN=true;
-      const miss=Object.keys(L).filter(k=>r[k]==null).map(k=>L[k]);const unc=(r.uncertain||[]).filter(k=>r[k]!=null&&L[k]).map(k=>L[k]);
-      $('#'+id+'-st .ocrbox>div').innerHTML=`<b>${r.found.length?'✓ Tabla leída':'No se ha podido leer la tabla'}</b><small>Comprueba los valores con la foto.</small>${unc.length?`<small class="w">Lectura dudosa: ${unc.join(', ')}</small>`:''}${miss.length?`<small class="w">No encontrado: ${miss.join(', ')} (escríbelo si aparece)</small>`:''}${r.notes.some(n=>/sodio/.test(n))?'<small>Sal calculada desde el sodio (× 2,5)</small>':''}`;
-      preview()}catch(e){setSt(id,`<div class="ev warn">⚠️ ${esc(e.message||'No se pudo leer')}. Puedes escribir los valores a mano.</div>`)}busy=false};
+      for(const k in L8){const i=$('#cx-'+k);if(r[k]!=null){i.value=fv(r[k]);i.classList.add('ocr')}}(r.uncertain||[]).forEach(k=>{const i=$('#cx-'+k);if(i&&r[k]!=null)i.classList.add('warn')});
+      if(r.base)$('#cx-base').value=r.base;
+      const got=Object.keys(L8).filter(k=>r[k]!=null);if(got.length)touchedN=true;
+      const miss=Object.keys(L8).filter(k=>r[k]==null).map(k=>L8[k]);const unc=(r.uncertain||[]).filter(k=>r[k]!=null&&L8[k]).map(k=>L8[k]);
+      const ok=got.length>=2;
+      stat(`<b>${ok?`✓ Tabla leída (${got.length} de 8 valores)`:got.length?'⚠️ Solo he podido leer 1 valor':'⚠️ No he podido leer los valores'}</b>`,
+        `<small>${ok?'Comprueba los valores con la foto.':'Prueba <b>✂️ Recortar tabla</b> (marca solo la tabla) o <b>↻ Girar</b>, o escribe los valores abajo.'}</small>
+        ${unc.length?`<small class="w">Revisa (lectura dudosa): ${unc.join(', ')}</small>`:''}${miss.length&&ok?`<small class="w">Falta: ${miss.join(', ')} (escríbelo si aparece)</small>`:''}${r.notes.some(n=>/sodio/.test(n))?'<small>Sal calculada desde el sodio (× 2,5)</small>':''}${nCrop?'<small>Leído solo en la zona recortada</small>':''}`,r);
+      preview()}catch(e){stat('<b>⚠️ No se pudo leer la foto</b>',`<small>${esc(e.message||'')}. Puedes reintentar, recortar o escribir los valores a mano.</small>`,null)}busy=false};
   const scanI=async f=>{if(!f)return;busy=true;const id='cx-i';
     try{const r=await OCR.readText(f,prog(id,f));const t=COMPLETE.cleanIngredients(r.text);$('#cx-ing').value=t;touchedI=true;
       if(!cosm){if(COMPLETE.detectBio(t))$('#cx-bio').checked=true;const l=COMPLETE.detectNutriLetter(r.text);if(l&&!$('#cx-ns').value)$('#cx-ns').value=l}
