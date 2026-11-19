@@ -114,3 +114,32 @@ summary{font-weight:700;cursor:pointer;min-height:28px}
 .fhint{font-size:13px;color:#92400e;background:#fef3c7;border-radius:8px;padding:6px 10px;margin-top:6px}
 input.invalid,input.invalid:focus{outline:none;border-width:2px;border-color:#dc2626!important;box-shadow:0 0 0 4px rgba(220,38,38,.3)!important;animation:shake .35s}
 @keyframes shake{25%{transform:translateX(-5px)}75%{transform:translateX(5px)}}
+
+/* Nota rápida */
+.qs{display:flex;align-items:center;gap:14px;margin:14px 0 6px;padding:12px;border-radius:14px;background:color-mix(in srgb,var(--c) 10%,#fff)}
+.qs-c{width:84px;height:84px;border-radius:50%;background:var(--c);color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;flex:none;box-shadow:0 3px 10px #0002}
+.qs-c b{font-size:34px;line-height:1}.qs-c small{font-size:12px;opacity:.9}
+.qs-t b{display:block;font-size:24px;color:var(--c)}.qs-t small{color:var(--mut);font-size:13px}
+.qs.none{--c:#9ca3af;background:#f3f4f6}.qs.none .qs-t b{font-size:17px;color:#4b5563}
+.qs-parts{display:flex;flex-direction:column;gap:6px;margin:8px 2px}
+.qp{display:grid;grid-template-columns:118px 1fr 48px;align-items:center;gap:8px;font-size:14px}.qp small{color:var(--mut)}.qp b{text-align:right}
+.qbar{height:10px;border-radius:99px;background:#eef0f2;overflow:hidden}.qbar i{display:block;height:100%;border-radius:99px}
+.qs-cap{font-size:14px;font-weight:600;color:#b91c1c;background:#fee2e2;border-radius:10px;padding:8px 10px;margin:8px 0}
+.qs-hl{display:grid;grid-template-columns:1fr;gap:6px;margin:8px 0}
+@media(min-width:520px){.qs-hl{grid-template-columns:1fr 1fr}}
+.qs-hl ul{list-style:none;margin:4px 0;padding:0}.qs-hl li{display:flex;gap:8px;align-items:flex-start;padding:5px 0;font-size:14px;border-bottom:1px solid #f1f2f4}
+.hlt{font-size:13px;text-transform:uppercase;letter-spacing:.03em;color:var(--mut)}
+.dot{display:inline-block;width:12px;height:12px;border-radius:50%;flex:none;margin-top:4px}
+.qsb{display:inline-flex;align-items:center;gap:4px;background:color-mix(in srgb,var(--c) 15%,#fff);color:var(--c)}.qsb i{width:9px;height:9px;border-radius:50%;background:var(--c)}
+.qs-sec{margin-top:8px}
+/* Aditivos con riesgo */
+.adds summary{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.rc{font-size:11px;font-weight:700;padding:2px 7px;border-radius:99px;background:color-mix(in srgb,var(--c) 15%,#fff);color:var(--c)}
+.addl{display:flex;flex-direction:column;margin-top:6px}
+details.add{box-shadow:none;margin:0;padding:8px 2px;border-radius:0;border-bottom:1px solid #f1f2f4}
+details.add summary{display:flex;gap:8px;align-items:center;font-weight:400;font-size:15px;list-style:none}
+details.add summary::-webkit-details-marker{display:none}
+details.add summary .dot{margin-top:0}.add .an{flex:1;min-width:0}.add .ar{font-size:13px;font-weight:700;white-space:nowrap}
+details.add summary:after{content:"›";color:var(--mut);transition:transform .2s}details.add[open] summary:after{transform:rotate(90deg)}
+details.add p{margin:6px 0 2px 20px;font-size:14px;color:#374151}
+.rnote{font-size:12px;color:var(--mut);margin:8px 0 0}

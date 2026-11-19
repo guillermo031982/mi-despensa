@@ -1,5 +1,5 @@
 /* Alimentos Sanos — complemento personal a Yuka. Vanilla JS, datos en IndexedDB (db.js). */
-const APP_VERSION='1.0.5';
+const APP_VERSION='1.0.6';
 const $=(s,r=document)=>r.querySelector(s);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,8);
@@ -27,7 +27,7 @@ async function ensureDefaults(){
 }
 
 /* ---------- Open Food Facts ---------- */
-const FIELDS='code,product_name,product_name_es,generic_name,generic_name_es,brands,quantity,image_front_url,image_url,image_front_small_url,ingredients_text_es,ingredients_text,nutriscore_grade,nova_group,ecoscore_grade,additives_tags,allergens_tags,traces_tags,categories,labels,nutriments,nutrition_data_per';
+const FIELDS='code,product_name,product_name_es,generic_name,generic_name_es,brands,quantity,image_front_url,image_url,image_front_small_url,ingredients_text_es,ingredients_text,nutriscore_grade,nutriscore_score,nutriscore_data,labels_tags,categories_tags,nova_group,ecoscore_grade,additives_tags,allergens_tags,traces_tags,categories,labels,nutriments,nutrition_data_per';
 async function lookup(code){
   for(const [src,host] of [['off','world.openfoodfacts.org'],['obf','world.openbeautyfacts.org']]){
     try{
@@ -49,7 +49,7 @@ function normalize(p,code,src){
     additives:(p.additives_tags||[]).map(t=>t.replace(/^\w\w:/,'').toUpperCase()),
     allergens:(p.allergens_tags||[]).map(t=>{const k=t.replace(/^\w\w:/,'');return ALLERG[k]||k}),
     traces:(p.traces_tags||[]).map(t=>{const k=t.replace(/^\w\w:/,'');return ALLERG[k]||k}),
-    offCategories:p.categories||'',labels:p.labels||'',nutr:offNutr(p)};
+    offCategories:p.categories||'',labels:p.labels||'',nutr:offNutr(p),...SCORE.fromOFF(p)};
 }
 async function searchOnline(q){
   // 1º buscador nuevo de OFF (search-a-licious), 2º buscador clásico
@@ -141,27 +141,61 @@ const nsBadge=g=>g&&/^[a-e]$/.test(g)?`<span class="badge ns ns-${g}">Nutri-Scor
 const novaBadge=n=>n?`<span class="badge nova${n}">NOVA ${n}</span>`:'';
 const vBadge=v=>v?`<span class="badge v-${v}">${VERD[v]}</span>`:'';
 const starsTxt=n=>n?'★'.repeat(n)+'☆'.repeat(5-n):'';
+/* ---------- Nota rápida 0-100 y riesgo de aditivos (score.js, additives-risk.js) ---------- */
+const adCode=c=>String(c||'').replace(/^(E\d+)(.*)$/i,(m,a,b)=>a.toUpperCase()+b.toLowerCase());
+function qsBadge(p){const r=SCORE.evaluate(p);if(r.score==null)return '';return `<span class="badge qsb" style="--c:${r.grade.c}" title="Nota rápida: ${r.grade.t}"><i></i>${r.score}</span>`}
+function riskList(items,codes){
+  return `<div class="addl">${items.map(a=>`<details class="add"><summary><i class="dot" style="background:${a.c}"></i><span class="an">${codes?`<b>${esc(adCode(a.code))}</b> `:''}${esc(a.name||'(sin nombre en la tabla)')}</span><span class="ar" style="color:${a.c}">${esc(a.t)}</span></summary><p>${esc(a.desc)}</p></details>`).join('')}</div>`;
+}
+const RISK_NOTE='<p class="rnote">Clasificación orientativa elaborada a partir de fuentes públicas (opiniones de la EFSA, clasificación de la IARC y estudios publicados). No es consejo médico ni procede de Yuka.</p>';
+function riskCounts(items){const n=[0,0,0,0];let u=0;items.forEach(a=>a.level==null?u++:n[a.level]++);
+  return [[3,'alto'],[2,'moderado'],[1,'limitado'],[0,'sin riesgo']].filter(([l])=>n[l]).map(([l,t])=>`<span class="rc" style="--c:${ADDITIVES.LEVELS[l].c}">${n[l]} ${t}</span>`).join('')+(u?`<span class="rc" style="--c:#9ca3af">${u} sin evaluar</span>`:'')}
+function quickScoreHTML(p){
+  const r=SCORE.evaluate(p);
+  if(r.score==null)return `<div class="qs none"><div class="qs-c"><b>?</b></div><div class="qs-t"><b>${esc(r.reason)}</b><small>Nota rápida automática</small></div></div>`;
+  const g=r.grade;
+  let h=`<div class="qs" style="--c:${g.c}"><div class="qs-c"><b>${r.score}</b><small>/100</small></div><div class="qs-t"><b>${g.t}</b><small>${r.type==='cosm'?'Nota rápida según los ingredientes':'Nota rápida automática'}</small></div></div>`;
+  if(r.type==='cosm'){
+    h+=r.capped?'<div class="qs-cap">⚠️ Contiene un ingrediente de riesgo alto: la nota no pasa de 49.</div>':'';
+    h+=`<div class="qs-sec"><b>🧴 Ingredientes a vigilar</b>${r.hits.length?riskList(r.hits.map(x=>({...x,code:''})),false):'<p class="muted" style="margin:4px 0">No hemos encontrado ingredientes de riesgo de nuestra lista.</p>'}</div>${RISK_NOTE}`;
+    return h;
+  }
+  h+=`<div class="qs-parts">${r.parts.map(x=>`<div class="qp"><span>${x.l} <small>(${x.w} %)</small></span><div class="qbar"><i style="width:${x.v}%;background:${SCORE.gradeOf(x.v).c}"></i></div><b>${x.pts}/${x.w}</b></div>`).join('')}</div>`;
+  if(r.capped)h+='<div class="qs-cap">⚠️ Tiene un aditivo de riesgo alto: la nota se limita a 49.</div>';
+  const it=(x,pos)=>`<li><i class="dot" style="background:${pos?(x.lv?'#65a30d':'#15803d'):(x.lv===3?'#dc2626':'#f97316')}"></i><span><b>${esc(x.t)}</b>${x.v?` <small class="muted">${esc(x.l)} ${esc(x.v)}</small>`:''}</span></li>`;
+  const ad=r.additives;const adBad=ad.filter(a=>a.level>=2);
+  const neg=r.hl.neg.map(x=>it(x,false)),pos=r.hl.pos.map(x=>it(x,true));
+  if(adBad.length)neg.push(`<li><i class="dot" style="background:${adBad.some(a=>a.level===3)?'#dc2626':'#f97316'}"></i><span><b>Aditivos de riesgo</b> <small class="muted">${adBad.map(a=>adCode(a.code)).join(', ')}</small></span></li>`);
+  else if(!ad.length)pos.push(`<li><i class="dot" style="background:#15803d"></i><span><b>Sin aditivos</b></span></li>`);
+  if(r.bio)pos.push(`<li><i class="dot" style="background:#15803d"></i><span><b>Ecológico</b></span></li>`);
+  if(neg.length||pos.length)h+=`<div class="qs-hl">${neg.length?`<div><b class="hlt">Puntos negativos</b><ul>${neg.join('')}</ul></div>`:''}${pos.length?`<div><b class="hlt">Puntos positivos</b><ul>${pos.join('')}</ul></div>`:''}</div>`;
+  if(!r.detail)h+='<div class="muted" style="font-size:12px">Nota calculada con la letra del Nutri-Score. Para ver el detalle de nutrientes, vuelve a escanearlo y pulsa «Actualizar datos de la base».</div>';
+  else if(r.computed)h+='<div class="muted" style="font-size:12px">Nutri-Score calculado con los valores nutricionales.</div>';
+  return h;
+}
 function imgOf(p){return p.photo||p.image||''}
 function pItem(p,catMap,extra){
   const im=imgOf(p);const c=catMap&&catMap[p.cat];
   return `<a class="pitem" href="#/p/${p.id}">${im?`<img loading="lazy" src="${esc(im)}" alt="">`:`<div class="noimg">📦</div>`}
   <div class="info"><b>${esc(p.name||'(sin nombre)')}</b><small>${esc(p.brand||'')}${c?` · ${esc(c.emoji||'')} ${esc(c.name)}`:''}${p.rating?` · <span style="color:#f59e0b">${starsTxt(p.rating)}</span>`:''}</small>
-  <div class="badges">${vBadge(p.verdict)}${nsBadge(p.nutriscore)}${novaBadge(p.nova)}${smartBadges(p)}</div>${extra||''}</div></a>`;
+  <div class="badges">${qsBadge(p)}${vBadge(p.verdict)}${nsBadge(p.nutriscore)}${novaBadge(p.nova)}${smartBadges(p)}</div>${extra||''}</div></a>`;
 }
 function infoBlock(p){
   const sc=[];
   if(p.nutriscore)sc.push(`<div class="score ns-${p.nutriscore} ${p.nutriscore?'ns':''}"><b>${p.nutriscore.toUpperCase()}</b>Nutri-Score</div>`);
   if(p.nova)sc.push(`<div class="score nova${p.nova}"><b>${p.nova}</b>NOVA</div>`);
   if(p.ecoscore&&/^[a-e]$/.test(p.ecoscore))sc.push(`<div class="score"><b>${p.ecoscore.toUpperCase()}</b>Eco-Score</div>`);
-  sc.push(`<div class="score"><b>${(p.additives||[]).length}</b>Aditivos</div>`);
+  if(p.src!=='obf')sc.push(`<div class="score"><b>${(p.additives||[]).length}</b>Aditivos</div>`);
   return `<div class="card"><div class="hero">${imgOf(p)?`<img src="${esc(imgOf(p))}" alt="">`:''}<div><h3>${esc(p.name||'(sin nombre)')}</h3><div class="muted">${esc(p.brand||'')}${p.quantity?' · '+esc(p.quantity):''}</div>
   ${p.code?`<div class="muted" style="font-size:13px;margin-top:4px">Código: ${esc(p.code)}</div>`:''}
   <div class="muted" style="font-size:12px;margin-top:2px">${p.src==='off'?'Datos: Open Food Facts':p.src==='obf'?'Datos: Open Beauty Facts':'Añadido a mano'}</div></div></div>
+  ${quickScoreHTML(p)}
   ${p.src!=='manual'?`<div class="scores">${sc.join('')}</div>`:''}
   ${p.nova?`<div class="muted" style="font-size:14px">NOVA ${p.nova}: ${NOVA[p.nova]||''}</div>`:''}</div>
   ${p.src!=='manual'?`
   <details ${p.ingredients?'':''}><summary>🧾 Ingredientes</summary><p class="list-add">${esc(p.ingredients||'No disponible')}</p></details>
-  <details><summary>🧪 Aditivos (${(p.additives||[]).length})</summary><p class="list-add">${(p.additives||[]).length?p.additives.map(a=>`<span class="badge" style="margin:2px;display:inline-block">${esc(a)}</span>`).join(' '):'Ninguno declarado'}</p></details>
+  ${p.src==='obf'?'':(()=>{const items=(p.additives||[]).map(a=>ADDITIVES.info(a)).sort((a,b)=>(b.level??-1)-(a.level??-1));
+    return `<details class="adds" ${items.length?'open':''}><summary>🧪 Aditivos (${items.length}) ${riskCounts(items)}</summary>${items.length?riskList(items,true)+RISK_NOTE:'<p class="list-add">Ninguno declarado</p>'}</details>`})()}
   <details><summary>⚠️ Alérgenos</summary><p class="list-add">${(p.allergens||[]).length?esc(p.allergens.join(', ')):'Ninguno declarado'}${(p.traces||[]).length?`<br><b>Trazas:</b> ${esc(p.traces.join(', '))}`:''}</p></details>`:''}`;
 }
 
@@ -247,7 +281,7 @@ async function vCat(id){
   const all=(await prods()).filter(p=>id==='none'?!p.cat||!cs.some(x=>x.id===p.cat):p.cat===id);
   const st=JSON.parse(sessionStorage.getItem('md-sort')||'{"s":"recent","f":"","q":""}');
   view.innerHTML=`<div class="search"><input id="q" type="search" placeholder="Filtrar en ${esc(c.name)}" value="${esc(st.q)}"></div>
-  <div class="toolbar"><select id="s"><option value="recent">Más recientes</option><option value="name">Nombre A-Z</option><option value="rating">Mejor valorados</option><option value="ns">Nutri-Score</option><option value="brand">Marca</option></select>
+  <div class="toolbar"><select id="s"><option value="recent">Más recientes</option><option value="name">Nombre A-Z</option><option value="rating">Mejor valorados</option><option value="qs">Nota rápida</option><option value="ns">Nutri-Score</option><option value="brand">Marca</option></select>
   <select id="f"><option value="">Todos</option><option value="bueno">👍 Buenos</option><option value="regular">😐 Regulares</option><option value="evitar">👎 Evitar</option></select></div>
   <div class="plist" id="list"></div>
   ${id!=='none'?`<div style="height:18px"></div><div class="row"><button class="btn ghost" id="ren">✏️ Editar categoría</button><button class="btn danger" id="del">🗑️ Borrar</button></div>`:''}
@@ -255,7 +289,7 @@ async function vCat(id){
   $('#s').value=st.s;$('#f').value=st.f;
   const draw=()=>{const q=$('#q').value.trim().toLowerCase(),s=$('#s').value,f=$('#f').value;sessionStorage.setItem('md-sort',JSON.stringify({s,f,q}));
     let l=all.filter(p=>(!f||p.verdict===f)&&(!q||[p.name,p.brand,p.notes,p.code].join(' ').toLowerCase().includes(q)));
-    const cmp={recent:(a,b)=>b.updated-a.updated,name:(a,b)=>(a.name||'').localeCompare(b.name||''),brand:(a,b)=>(a.brand||'').localeCompare(b.brand||''),rating:(a,b)=>(b.rating||0)-(a.rating||0),ns:(a,b)=>(a.nutriscore||'z').localeCompare(b.nutriscore||'z')}[s];
+    const cmp={recent:(a,b)=>b.updated-a.updated,name:(a,b)=>(a.name||'').localeCompare(b.name||''),brand:(a,b)=>(a.brand||'').localeCompare(b.brand||''),rating:(a,b)=>(b.rating||0)-(a.rating||0),ns:(a,b)=>(a.nutriscore||'z').localeCompare(b.nutriscore||'z'),qs:(a,b)=>(SCORE.evaluate(b).score??-1)-(SCORE.evaluate(a).score??-1)}[s];
     l.sort(cmp);$('#list').innerHTML=l.length?l.map(p=>pItem(p)).join(''):`<div class="empty"><div class="big">${esc(c.emoji||'📦')}</div>${all.length?'Nada coincide con el filtro.':'Aún no hay productos aquí. Pulsa 📷 para escanear uno.'}</div>`};
   ['q','s','f'].forEach(k=>$('#'+k).addEventListener('input',draw));draw();
   if(id!=='none'){
@@ -369,6 +403,9 @@ async function vAjustes(){
   <div class="card"><h3 style="margin:0 0 6px">💾 Copia de seguridad</h3><p class="muted" style="margin:0 0 10px">Tus datos se guardan solo en este móvil (${ps.length} productos${est}). Exporta de vez en cuando un archivo para no perderlos o pasarlos a otro móvil.</p>
     <button class="btn block" id="exp">⬇️ Exportar copia (JSON)</button><div style="height:8px"></div>
     <label class="btn ghost block" style="margin:0">⬆️ Importar copia<input type="file" id="imp" accept="application/json,.json" hidden></label></div>
+  <div class="card"><h3 style="margin:0 0 6px">🟢 Nota rápida (0-100)</h3><p style="font-size:14px;margin:4px 0">Se calcula sola: <b>60 %</b> calidad nutricional (Nutri-Score), <b>30 %</b> aditivos y <b>10 %</b> ecológico. Si hay un aditivo de riesgo alto, la nota no pasa de 49. En cosméticos se mira el riesgo de los ingredientes.</p>
+    <div class="badges"><span class="badge qsb" style="--c:#15803d"><i></i>75-100 Excelente</span><span class="badge qsb" style="--c:#65a30d"><i></i>50-74 Bueno</span><span class="badge qsb" style="--c:#f97316"><i></i>25-49 Mediocre</span><span class="badge qsb" style="--c:#dc2626"><i></i>0-24 Malo</span></div>
+    <p class="muted" style="font-size:13px">Es independiente de tu valoración personal (estrellas y veredicto). La clasificación de ${ADDITIVES.count} aditivos es orientativa, elaborada a partir de fuentes públicas (EFSA, IARC); no procede de Yuka.</p></div>
   <div class="card"><h3 style="margin:0 0 6px">ℹ️ Acerca de</h3><div class="kv"><dt>App</dt><dd><b>Alimentos Sanos</b></dd><dt>Versión</dt><dd><b>${APP_VERSION}</b> <span id="updState" class="muted"></span></dd><dt>Datos</dt><dd>Open Food Facts / Open Beauty Facts (licencia ODbL)</dd><dt>Almacenamiento</dt><dd>Local (IndexedDB), no se envía a ningún servidor</dd></div>
     <div style="height:10px"></div><button class="btn ghost block" id="chk">🔄 Buscar actualización</button>
     <p class="muted" style="font-size:13px">La app se actualiza sola cuando hay versión nueva. Actualizar nunca borra tus productos.</p></div>`;
