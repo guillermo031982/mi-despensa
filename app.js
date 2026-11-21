@@ -1,5 +1,5 @@
 /* Alimentos Sanos — complemento personal a Yuka. Vanilla JS, datos en IndexedDB (db.js). */
-const APP_VERSION='1.0.8';
+const APP_VERSION='1.0.9';
 const $=(s,r=document)=>r.querySelector(s);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,8);
@@ -49,7 +49,7 @@ function normalize(p,code,src){
     additives:(p.additives_tags||[]).map(t=>t.replace(/^\w\w:/,'').toUpperCase()),
     allergens:(p.allergens_tags||[]).map(t=>{const k=t.replace(/^\w\w:/,'');return ALLERG[k]||k}),
     traces:(p.traces_tags||[]).map(t=>{const k=t.replace(/^\w\w:/,'');return ALLERG[k]||k}),
-    offCategories:p.categories||'',labels:p.labels||'',nutr:offNutr(p),...SCORE.fromOFF(p)};
+    offCategories:p.categories||'',catTags:p.categories_tags||[],labels:p.labels||'',nutr:offNutr(p),...SCORE.fromOFF(p)};
 }
 async function searchOnline(q){
   // 1º buscador nuevo de OFF (search-a-licious), 2º buscador clásico
@@ -204,7 +204,7 @@ function infoBlock(p){
   <details ${p.ingredients?'':''}><summary>🧾 Ingredientes</summary><p class="list-add">${esc(p.ingredients||'No disponible')}</p></details>
   ${p.src==='obf'?'':(()=>{const items=(p.additives||[]).map(a=>ADDITIVES.info(a)).sort((a,b)=>(b.level??-1)-(a.level??-1));
     return `<details class="adds" ${items.length?'open':''}><summary>🧪 Aditivos (${items.length}) ${riskCounts(items)}</summary>${items.length?riskList(items,true)+RISK_NOTE:'<p class="list-add">Ninguno declarado</p>'}</details>`})()}
-  <details><summary>⚠️ Alérgenos</summary><p class="list-add">${(p.allergens||[]).length?esc(p.allergens.join(', ')):'Ninguno declarado'}${(p.traces||[]).length?`<br><b>Trazas:</b> ${esc(p.traces.join(', '))}`:''}</p></details>`:''}`;
+  <details><summary>⚠️ Alérgenos</summary><p class="list-add">${(p.allergens||[]).length?esc(p.allergens.join(', ')):'Ninguno declarado'}${(p.traces||[]).length?`<br><b>Trazas:</b> ${esc(p.traces.join(', '))}`:''}</p></details>`:''}`+recipesHTML(p);
 }
 
 /* Formulario guardar/editar (categoría, valoración, veredicto, notas) */
@@ -360,11 +360,82 @@ function completeSheet(p){return new Promise(res=>{
 })}
 
 /* ---------- Vistas ---------- */
+
+/* ---------- Recetas caseras (recipes.js): solo si la nota es 50 o más ---------- */
+function favId(r,p){return r.id+'__'+String((p&&(p.code||p.id||p.name))||r.product||'')}
+function recipesHTML(p){
+  const ev=SCORE.evaluate(p);
+  if(p.src==='obf'||!ev||ev.score==null||ev.score<50)return '';
+  const got=RECIPES.forProduct(p,{page:0});
+  if(!got.ok)return '';
+  return `<div class="rcsec" id="rcsec"><h3 style="margin:0 0 4px">🍳 Recetas con este producto</h3>
+    <p class="muted" id="rcsub" style="font-size:14px;margin:0 0 10px">Platos sencillos de hasta 6 ingredientes, con lo que suele haber en casa.</p>
+    <div id="rlist"></div>
+    <button type="button" class="btn ghost block" id="rmore" hidden>🔄 Otras ideas</button>
+    <a class="muted" href="#/recetas" style="display:block;text-align:center;margin-top:8px;font-size:13px">💛 Ver mis recetas guardadas</a></div>`;
+}
+function recipeCard(r,on,saved){
+  const basics=r.ings.filter(i=>i.b),main=r.ings.filter(i=>!i.b);
+  const li=i=>`<li${i.b?' class="bas"':''}><b>${esc(i.n)}</b>${i.q?` <span class="muted">${esc(i.q)}</span>`:''}</li>`;
+  return `<details class="rcard" data-rid="${esc(r.id)}"${saved&&r.id?` data-fid="${esc(r.id)}"`:''}><summary>
+    <span class="remo">${r.e||'🍽️'}</span>
+    <div class="rtit"><b>${esc(r.t)}</b><small>${r.min?r.min+' min':''}${r.srv?` · ${r.srv} ración${r.srv===1?'':'es'}`:''}${saved&&r.product?` · <span class="muted">${esc(r.product)}</span>`:''}</small></div>
+    <button type="button" class="rfav ${on?'on':''}" data-fav="${esc(r.id)}" aria-label="${on?'Quitar de mis recetas':'Guardar en mis recetas'}">${on?'💛':'🤍'}</button>
+  </summary>
+  <div class="rbody">
+    <b>Ingredientes</b>
+    <ul class="rings">${main.map(li).join('')}${basics.map(li).join('')}</ul>
+    <b>Preparación</b>
+    <ol class="rsteps">${r.steps.map(t=>`<li>${esc(t)}</li>`).join('')}</ol>
+  </div></details>`;
+}
+async function bindRecipes(p){
+  const box=$('#rcsec');if(!box)return;
+  let catName='';
+  if(p.cat){try{const c=(await cats()).find(x=>x.id===p.cat);if(c)catName=c.name}catch(e){}}
+  let page=0;
+  const draw=async()=>{
+    const got=RECIPES.forProduct(p,{catName,page});
+    if(!got.ok||!got.recipes.length){box.hidden=true;return}
+    box.hidden=false;
+    const sub=$('#rcsub');if(sub&&got.label)sub.textContent=`Ideas con ${got.label}: platos sencillos de hasta 6 ingredientes, con lo que suele haber en casa.`;
+    let favs=[];try{favs=await DB.all('favs')}catch(e){}
+    const ids=new Set(favs.map(f=>f.id));
+    $('#rlist').innerHTML=got.recipes.map(r=>recipeCard(r,ids.has(favId(r,p)),false)).join('');
+    const more=$('#rmore');if(more){more.hidden=got.total<=4;more.onclick=()=>{page++;draw()}}
+    $('#rlist').querySelectorAll('.rcard summary').forEach(sm=>sm.addEventListener('click',ev=>{if(ev.target.closest('.rfav'))ev.preventDefault()}));
+    $('#rlist').querySelectorAll('.rfav').forEach(b=>b.onclick=async ev=>{
+      ev.preventDefault();ev.stopPropagation();
+      const rec=got.recipes.find(x=>x.id===b.dataset.fav);if(!rec)return;
+      const id=favId(rec,p);
+      try{
+        const has=await DB.get('favs',id);
+        if(has){await DB.del('favs',id);b.classList.remove('on');b.textContent='🤍';b.setAttribute('aria-label','Guardar en mis recetas');toast('Quitada de mis recetas')}
+        else{await DB.put('favs',{id,rid:rec.id,code:p.code||'',product:p.name||'',productId:p.id||'',e:rec.e,t:rec.t,min:rec.min,srv:rec.srv,ings:rec.ings,steps:rec.steps,g:rec.g,at:Date.now()});b.classList.add('on');b.textContent='💛';b.setAttribute('aria-label','Quitar de mis recetas');toast('💛 Guardada en mis recetas')}
+      }catch(e){toast('No se pudo guardar')}
+    });
+  };
+  await draw();
+}
+
+async function vRecetas(){
+  setTitle('Mis recetas',true);tab('home');
+  let favs=[];try{favs=(await DB.all('favs')).sort((a,b)=>(b.at||0)-(a.at||0))}catch(e){}
+  if(!favs.length){view.innerHTML=`<div class="empty"><div class="big">💛</div>Aún no has guardado recetas. Cuando un alimento saque 50 o más en la nota rápida, verás 4 ideas: pulsa la estrella para guardarlas aquí.</div>`;return}
+  view.innerHTML=`<p class="muted" style="margin:0 0 10px">Las recetas que has marcado con la estrella. Se quedan en este móvil (${favs.length}).</p><div id="rlist">${favs.map(r=>recipeCard(r,true,true)).join('')}</div>`;
+  $('#rlist').querySelectorAll('.rfav').forEach(b=>b.onclick=async ev=>{
+    ev.preventDefault();ev.stopPropagation();
+    const id=b.closest('.rcard')?.dataset.fid;if(!id)return;await DB.del('favs',id);toast('Quitada de mis recetas');vRecetas();
+  });
+}
+
+
 async function vHome(){
   setTitle('Alimentos Sanos');tab('home');
   const [cs,ps]=await Promise.all([cats(),prods()]);
   const count={};ps.forEach(p=>count[p.cat||'']=(count[p.cat||'']||0)+1);
   const smartCount={fibra:0,altoFibra:0,altoProteina:0};ps.forEach(p=>{const x=NUTR.sections(p);for(const k in smartCount)if(x[k])smartCount[k]++});
+  let nFav=0;try{nFav=(await DB.all('favs')).length}catch(e){}
   const recent=ps.sort((a,b)=>b.updated-a.updated).slice(0,5);const cm=Object.fromEntries(cs.map(c=>[c.id,c]));
   view.innerHTML=`<div class="search"><input id="q" type="search" placeholder="Buscar en mis productos" enterkeyhint="search"></div>
   <div class="row" style="margin-bottom:6px"><a class="btn" href="#/scan">📷 Escanear</a><a class="btn sec" href="#/manual">✍️ Añadir a mano</a></div>
@@ -373,7 +444,8 @@ async function vHome(){
   ${count['']?`<a class="cat" href="#/cat/none" style="--c:#9ca3af"><span class="emo">🗂️</span><div><b>Sin categoría</b><br><small>${count['']} productos</small></div></a>`:''}
   <a class="cat" href="#" id="addCat" style="--c:#d1d5db;align-items:center;justify-content:center;color:var(--g)"><span class="emo">＋</span><b>Nueva categoría</b></a></div>
   <h2>Secciones <span class="muted" style="font-weight:400;font-size:14px">(automáticas)</span></h2>
-  <div class="grid">${Object.entries(SMART).map(([k,v])=>`<a class="cat smart" href="#/smart/${k}" style="--c:${v.c}"><span class="emo">${v.e}</span><div><b>${v.t}</b><br><small>${smartCount[k]} producto${smartCount[k]===1?'':'s'}</small></div></a>`).join('')}</div>
+  <div class="grid">${Object.entries(SMART).map(([k,v])=>`<a class="cat smart" href="#/smart/${k}" style="--c:${v.c}"><span class="emo">${v.e}</span><div><b>${v.t}</b><br><small>${smartCount[k]} producto${smartCount[k]===1?'':'s'}</small></div></a>`).join('')}
+  <a class="cat smart" href="#/recetas" style="--c:#e11d48"><span class="emo">💛</span><div><b>Mis recetas</b><br><small>${nFav?nFav+' guardada'+(nFav===1?'':'s'):'Las que marques con estrella'}</small></div></a></div>
   ${recent.length?`<h2>Últimos guardados</h2><div class="plist">${recent.map(p=>pItem(p,cm)).join('')}</div>`:`<div class="empty"><div class="big">🛒</div>Escanea tu primer producto y guárdalo en una categoría.</div>`}`;
   $('#addCat').onclick=async e=>{e.preventDefault();if(await editCat())vHome()};
   $('#q').addEventListener('keydown',e=>{if(e.key==='Enter')location.hash='#/buscar?q='+encodeURIComponent(e.target.value)});
@@ -455,6 +527,7 @@ async function vLookup(code,params){
   if(existing){const shown=existing.user?COMPLETE.applyUser(p,existing.user):p;
     view.innerHTML=infoBlock(shown)+`<div class="card"><b>Ya lo tienes guardado.</b><div style="height:10px"></div><a class="btn block" href="#/p/${existing.id}">Ver mi ficha</a><div style="height:8px"></div><button class="btn sec block" id="refresh">🔄 Actualizar datos de la base</button>${existing.user?'<div class="muted" style="font-size:12px;margin-top:6px">Tus datos completados se conservan, salvo que elijas lo contrario.</div>':''}</div>`;
     bindComplete(existing,async u=>{await DB.put('prods',{...COMPLETE.applyUser(existing,u),updated:Date.now()});toast('✓ Datos completados');location.hash='#/p/'+existing.id});
+    bindRecipes(shown);
     $('#refresh').onclick=async()=>{const {photo,notes,rating,verdict,cat,id,created,name}=existing;
       const keepUser=existing.user?confirm('Tienes datos completados por ti con fotos.\n\nAceptar = conservarlos encima de los de la base\nCancelar = borrarlos y usar solo los de la base'):false;
       const keep=existing.nutr&&existing.nutr.source!=='off'&&(keepUser||existing.nutr.source!=='usuario')?existing.nutr:p.nutr||(existing.nutr&&existing.nutr.source==='usuario'?null:existing.nutr);
@@ -468,6 +541,7 @@ async function vLookup(code,params){
 async function renderNew(p){
   view.innerHTML=infoBlock(p)+await saveForm(p,true)+`<a class="btn ghost block" href="#/scan">📷 Escanear otro</a>`;
   bindForm(p,o=>{if(o.cat)localStorage.setItem('md-lastcat',o.cat);location.hash='#/p/'+o.id});
+  bindRecipes(p);
   bindComplete(p,async u=>{
     // conservar lo ya escrito en el formulario
     const v=id=>{const e=$(id);return e?e.value:undefined};
@@ -485,6 +559,7 @@ async function vProduct(id){
   view.innerHTML=infoBlock(p)+(p.notes?`<div class="card"><b>📝 Mis notas</b><p style="white-space:pre-wrap;margin:6px 0 0">${esc(p.notes)}</p></div>`:'')+await saveForm(p,false)+
   `<div class="row">${p.code&&p.src!=='manual'?`<a class="btn ghost" href="https://world.${p.src==='obf'?'openbeautyfacts':'openfoodfacts'}.org/product/${esc(p.code)}" target="_blank" rel="noopener">🌐 Ver en ${p.src==='obf'?'OBF':'OFF'}</a>`:''}<button class="btn danger" id="pdel">🗑️ Borrar</button></div>`;
   bindForm(p,()=>vProduct(id));
+  bindRecipes(p);
   bindComplete(p,async u=>{const cur=await DB.get('prods',id)||p;await DB.put('prods',{...COMPLETE.applyUser(cur,u),updated:Date.now()});toast('✓ Datos completados');await vProduct(id);const q=document.querySelector('.qs');if(q)q.scrollIntoView({block:'center'})});
   $('#pdel').onclick=async()=>{if(confirm('¿Borrar este producto de tu despensa?')){await DB.del('prods',id);toast('Borrado');history.back()}};
 }
@@ -522,7 +597,7 @@ async function vBuscar(params){
 
 async function vAjustes(){
   setTitle('Ajustes');tab('ajustes');
-  const [cs,ps]=await Promise.all([cats(),prods()]);const count={};ps.forEach(p=>count[p.cat]=(count[p.cat]||0)+1);
+  const [cs,ps]=await Promise.all([cats(),prods()]);const count={};ps.forEach(p=>count[p.cat]=(count[p.cat]||0)+1);let nFav=0;try{nFav=(await DB.all('favs')).length}catch(e){}
   let est='';try{if(navigator.storage?.estimate){const e=await navigator.storage.estimate();est=` · ${(e.usage/1048576).toFixed(1)} MB usados`}}catch(e){}
   view.innerHTML=`<div class="card"><h3 style="margin:0 0 8px">🗂️ Categorías</h3><div class="plist" id="clist">${cs.map((c,i)=>`<div class="pitem" style="border-left:6px solid ${c.color}"><div class="noimg">${esc(c.emoji||'📦')}</div><div class="info"><b>${esc(c.name)}</b><small>${count[c.id]||0} productos</small></div>
     <button class="iconbtn" style="background:#f3f4f6;color:#111;font-size:18px" data-up="${i}" ${i?'':'disabled'} aria-label="Subir">▲</button><button class="iconbtn" style="background:#f3f4f6;color:#111;font-size:18px" data-ed="${c.id}" aria-label="Editar">✏️</button></div>`).join('')}</div>
@@ -533,6 +608,8 @@ async function vAjustes(){
   <div class="card"><h3 style="margin:0 0 6px">🟢 Nota rápida (0-100)</h3><p style="font-size:14px;margin:4px 0">Se calcula sola: <b>60 %</b> calidad nutricional (Nutri-Score), <b>30 %</b> aditivos y <b>10 %</b> ecológico. Si hay un aditivo de riesgo alto, la nota no pasa de 49. En cosméticos se mira el riesgo de los ingredientes.</p>
     <div class="badges"><span class="badge qsb" style="--c:#15803d"><i></i>75-100 Excelente</span><span class="badge qsb" style="--c:#65a30d"><i></i>50-74 Bueno</span><span class="badge qsb" style="--c:#f97316"><i></i>25-49 Mediocre</span><span class="badge qsb" style="--c:#dc2626"><i></i>0-24 Malo</span></div>
     <p class="muted" style="font-size:13px">Es independiente de tu valoración personal (estrellas y veredicto). La clasificación de ${ADDITIVES.count} aditivos es orientativa, elaborada a partir de fuentes públicas (EFSA, IARC); no procede de Yuka.</p></div>
+  <div class="card"><h3 style="margin:0 0 6px">💛 Mis recetas</h3><p class="muted" style="margin:0 0 10px">Las recetas que marques con la estrella en un producto (cuando la nota sea 50 o más) se guardan en este móvil.</p>
+    <a class="btn ghost block" href="#/recetas">Ver mis recetas${nFav?` (${nFav})`:''}</a></div>
   <div class="card"><h3 style="margin:0 0 6px">ℹ️ Acerca de</h3><div class="kv"><dt>App</dt><dd><b>Alimentos Sanos</b></dd><dt>Versión</dt><dd><b>${APP_VERSION}</b> <span id="updState" class="muted"></span></dd><dt>Datos</dt><dd>Open Food Facts / Open Beauty Facts (licencia ODbL)</dd><dt>Almacenamiento</dt><dd>Local (IndexedDB), no se envía a ningún servidor</dd></div>
     <div style="height:10px"></div><button class="btn ghost block" id="chk">🔄 Buscar actualización</button>
     <p class="muted" style="font-size:13px">La app se actualiza sola cuando hay versión nueva. Actualizar nunca borra tus productos.</p></div>`;
@@ -545,7 +622,7 @@ async function vAjustes(){
   $('#chk').onclick=()=>checkUpdate(true);
 }
 async function exportData(){
-  const data={app:'mi-despensa',name:'Alimentos Sanos',version:APP_VERSION,exported:new Date().toISOString(),cats:await DB.all('cats'),prods:await DB.all('prods')};
+  const data={app:'mi-despensa',name:'Alimentos Sanos',version:APP_VERSION,exported:new Date().toISOString(),cats:await DB.all('cats'),prods:await DB.all('prods')};try{data.favs=await DB.all('favs')}catch(e){data.favs=[]}
   const blob=new Blob([JSON.stringify(data)],{type:'application/json'});const name=`alimentos-sanos-${new Date().toISOString().slice(0,10)}.json`;
   const file=new File([blob],name,{type:'application/json'});
   if(navigator.canShare&&navigator.canShare({files:[file]})){try{await navigator.share({files:[file],title:'Copia Alimentos Sanos'});return}catch(e){if(e.name==='AbortError')return}}
@@ -555,7 +632,7 @@ async function importData(f){
   try{const d=JSON.parse(await f.text());if(d.app!=='mi-despensa'||!Array.isArray(d.prods))throw 0;
     const replace=confirm(`Copia con ${d.prods.length} productos y ${d.cats.length} categorías.\n\nAceptar = REEMPLAZAR todo lo actual\nCancelar = AÑADIR / combinar con lo actual`);
     if(replace){await DB.clear('prods');await DB.clear('cats')}
-    await DB.bulkPut('cats',d.cats);await DB.bulkPut('prods',d.prods);localStorage.setItem('md-init','1');toast('✓ Copia importada');vAjustes();
+    await DB.bulkPut('cats',d.cats);await DB.bulkPut('prods',d.prods);if(Array.isArray(d.favs)){try{if(replace)await DB.clear('favs');await DB.bulkPut('favs',d.favs)}catch(e){}}localStorage.setItem('md-init','1');toast('✓ Copia importada');vAjustes();
   }catch(e){alert('Ese archivo no es una copia válida de Alimentos Sanos.')}
 }
 
@@ -566,7 +643,7 @@ async function route(){
   window.scrollTo(0,0);
   try{
     if(!seg.length)return vHome();
-    switch(seg[0]){case 'cat':return vCat(seg[1]);case 'smart':return vSmart(seg[1]);case 'scan':return vScan(params);case 'lookup':return vLookup(seg[1],params);case 'p':return vProduct(seg[1]);case 'manual':return vManual(params);case 'buscar':return vBuscar(params);case 'ajustes':return vAjustes();default:location.hash='#/'}
+    switch(seg[0]){case 'cat':return vCat(seg[1]);case 'smart':return vSmart(seg[1]);case 'scan':return vScan(params);case 'lookup':return vLookup(seg[1],params);case 'p':return vProduct(seg[1]);case 'manual':return vManual(params);case 'buscar':return vBuscar(params);case 'ajustes':return vAjustes();case 'recetas':return vRecetas();default:location.hash='#/'}
   }catch(e){console.error(e);view.innerHTML=`<div class="empty">Error: ${esc(e.message)}</div>`}
 }
 addEventListener('hashchange',route);

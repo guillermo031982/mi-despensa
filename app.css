@@ -161,3 +161,20 @@ details.add p{margin:6px 0 2px 20px;font-size:14px;color:#374151}
 .rawtxt{margin-top:8px}.rawtxt pre{white-space:pre-wrap;font-size:12px;background:#f3f4f6;padding:8px;border-radius:8px;max-height:220px;overflow:auto}
 .cropstage{position:relative;line-height:0}.cropstage canvas{width:100%;height:auto;border-radius:10px;touch-action:none}
 .cropstage i{position:absolute;border:3px solid #16a34a;background:#16a34a22;border-radius:4px;pointer-events:none}
+
+/* Recetas (v1.0.9) */
+.rcsec{margin:14px 0 18px}
+.rcsec h3{font-size:18px}
+.rcard{padding:0;margin:0 0 10px;overflow:hidden}
+.rcard summary{display:flex;align-items:center;gap:10px;padding:12px 14px;list-style:none;cursor:pointer}
+.rcard summary::-webkit-details-marker{display:none}
+.remo{font-size:26px;flex:none;width:40px;text-align:center}
+.rtit{flex:1;min-width:0}
+.rtit b{display:block;font-size:16px;line-height:1.25}
+.rtit small{color:var(--mut);font-size:13px}
+.rfav{flex:none;width:44px;height:44px;border:0;background:transparent;font-size:22px;cursor:pointer;border-radius:12px}
+.rfav:hover,.rfav.on{background:#fff1f2}
+.rbody{padding:0 14px 14px;border-top:1px solid var(--bd)}
+.rings,.rsteps{margin:6px 0 10px;padding-left:20px;font-size:15px}
+.rings li,.rsteps li{margin:4px 0}
+.rings li.bas{font-weight:400;color:var(--mut);font-size:14px}

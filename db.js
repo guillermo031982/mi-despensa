@@ -4,10 +4,11 @@ const DB=(()=>{
   function open(){
     if(dbp)return dbp;
     dbp=new Promise((res,rej)=>{
-      const r=indexedDB.open('mi-despensa',1);
+      const r=indexedDB.open('mi-despensa',2);
       r.onupgradeneeded=()=>{const d=r.result;
         if(!d.objectStoreNames.contains('cats'))d.createObjectStore('cats',{keyPath:'id'});
         if(!d.objectStoreNames.contains('prods')){const s=d.createObjectStore('prods',{keyPath:'id'});s.createIndex('cat','cat');s.createIndex('code','code')}
+        if(!d.objectStoreNames.contains('favs'))d.createObjectStore('favs',{keyPath:'id'});
       };
       r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error);
     });
